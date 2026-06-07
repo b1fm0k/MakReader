@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MakReader</title>
+<style>
+  :root{--bg:#0e1014;--panel:#171a21;--panel2:#1f232c;--border:#2a2f3a;--text:#e7e9ee;
+    --muted:#9aa3b2;--accent:#7c5cff;--accent2:#5a8dee;--good:#3ec27a;--warn:#e0a13a;--reader-bg:#0a0a0a;}
+  *{box-sizing:border-box}html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  button{font-family:inherit;cursor:pointer}.hidden{display:none !important}
+  header{position:sticky;top:0;z-index:50;background:rgba(14,16,20,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+  .bar{display:flex;align-items:center;gap:10px;padding:12px 16px;max-width:1100px;margin:0 auto;flex-wrap:wrap}
+  .logo{font-weight:800;font-size:20px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
+  .tabs{display:flex;gap:4px;flex:1}
+  .tab{background:none;border:none;color:var(--muted);padding:8px 13px;border-radius:9px;font-size:14px;font-weight:600}
+  .tab.active{background:var(--panel2);color:var(--text)}
+  .tab .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;font-size:11px;line-height:18px;text-align:center;background:var(--accent);color:#fff;border-radius:9px}
+  .search{display:flex;gap:8px;align-items:center}
+  select,.search input{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:10px;font-size:14px;outline:none}
+  .search input{width:200px}.search input:focus{border-color:var(--accent)}
+  main{max-width:1100px;margin:0 auto;padding:18px 16px 70px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .12s,border-color .12s;position:relative}
+  .card:hover{transform:translateY(-3px);border-color:var(--accent)}
+  .card .cover{width:100%;aspect-ratio:11/16;object-fit:cover;background:var(--panel2);display:block}
+  .card .meta{padding:8px 10px}
+  .card .t{font-size:13px;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .card .s{font-size:11px;color:var(--muted);margin-top:4px}
+  .srcpill{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:7px}
+  .rmbtn{position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.7);color:#fff;border:none;width:24px;height:24px;border-radius:50%;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center}
+  .rmbtn:hover{background:#c0392b}
+  .unread{position:absolute;top:8px;right:8px;background:var(--good);color:#06231a;font-size:11px;font-weight:800;padding:2px 7px;border-radius:9px}
+  .inlib{position:absolute;top:8px;right:8px;z-index:2;background:var(--good);color:#06231a;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
+  .dlpill{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px}
+  .card.sel{outline:3px solid var(--accent);outline-offset:-3px}
+  .selbox{position:absolute;bottom:8px;left:8px;z-index:3;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+  .card.sel .selbox{background:var(--accent);border-color:var(--accent)}
+  .grid.compact{grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:11px}
+  .grid.compact .card .t{font-size:12px}
+  .bulkbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:14px}
+  .bulkbar .cnt{font-weight:700;margin-right:4px}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}
+  .chip{background:var(--panel);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:20px;font-size:13px;cursor:pointer}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .chap .dot{width:9px;height:9px;border-radius:50%;background:var(--accent2);flex:none}
+  .chap.st-cur{border-color:#1fa9e0}.chap.st-new{border-color:#e8514a}
+  .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:10px}
+  .ctile{height:54px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer;background:#3f444e;color:#e7e9ee;padding:0 6px;text-align:center;line-height:1.1;overflow:hidden;transition:transform .1s}
+  .ctile:hover{transform:translateY(-2px)}
+  .ctile.read{background:#23262e;color:#cfd3da}
+  .ctile.cur{background:#1fa9e0;color:#fff}
+  .ctile.new{background:#e8514a;color:#fff}
+  .ctile.dl{box-shadow:inset 0 -4px 0 var(--good)}
+  .chap .cdl{background:var(--panel2);border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:4px 9px;font-size:12px}
+  .chap .cdl.done{color:var(--good);border-color:var(--good)}
+  .card.update::after{content:"NEW";position:absolute;top:8px;right:8px;background:var(--good);color:#06231a;font-size:10px;font-weight:800;padding:2px 6px;border-radius:6px}
+  .empty{color:var(--muted);text-align:center;padding:60px 20px;font-size:15px;line-height:1.6}.empty b{color:var(--text)}
+  h3.sec{font-size:15px;margin:4px 0 12px}
+  /* detail */
+  .hero{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--border)}
+  .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center top;filter:blur(30px) brightness(.32);transform:scale(1.2)}
+  .hero .detail-head{position:relative;padding:22px}
+  .detail-head{display:flex;gap:20px;flex-wrap:wrap}
+  .detail-head .cover{width:210px;aspect-ratio:11/16;object-fit:cover;border-radius:12px;border:1px solid var(--border);background:var(--panel2);box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .alttitles{color:var(--muted);font-size:12.5px;margin:0 0 8px;line-height:1.5;font-style:italic}
+  .desc.clamp{max-height:130px;overflow:hidden;-webkit-mask-image:linear-gradient(#000 65%,transparent);mask-image:linear-gradient(#000 65%,transparent)}
+  .descmore{background:none;border:none;color:var(--accent2);font-size:13px;font-weight:700;padding:8px 0;cursor:pointer}
+  .malbox{border:0.5px solid var(--border);border-radius:12px;margin-top:18px;background:var(--panel)}
+  .malbox>summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px}
+  .malbox>summary::-webkit-details-marker{display:none}
+  .malbox>summary::before{content:"▸";color:var(--muted)}
+  .malbox[open]>summary::before{content:"▾"}
+  .malc{padding:0 16px 16px}
+  .malh{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--accent2);margin:14px 0 6px;font-weight:700}
+  .malrow{font-size:13px;color:#c7ccd6;line-height:1.7}.malrow b{color:var(--muted);font-weight:600}
+  .malsyn{font-size:13px;color:#c7ccd6;line-height:1.7;max-height:240px;overflow:auto;white-space:normal}
+  .detail-info{flex:1;min-width:260px}.detail-info h1{margin:0 0 6px;font-size:24px}
+  .detail-info .alt{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .tagrow{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+  .tag{background:var(--panel2);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 9px;border-radius:20px}
+  .metaline{color:#c7ccd6;font-size:13px;margin:2px 0 4px}.metaline b{color:var(--muted);font-weight:600}
+  .desc{color:#c7ccd6;font-size:14px;line-height:1.6;margin:12px 0;max-height:170px;overflow:auto}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .btn{background:var(--accent);color:#fff;border:none;padding:10px 18px;border-radius:10px;font-weight:700;font-size:14px}
+  .btn.sec{background:var(--panel2);color:var(--text);border:1px solid var(--border)}.btn.on{background:var(--good);color:#06231a}
+  .chapters{margin-top:24px}.chapters h3{font-size:15px;margin:0 0 10px}
+  .chap{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--panel);cursor:pointer}
+  .chap:hover{background:var(--panel2)}.chap.read{opacity:.55}
+  .chap .num{font-weight:700;font-size:14px;min-width:90px}.chap .ti{flex:1;font-size:13px;color:#c7ccd6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* sources tab */
+  .srcrow{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--border);border-radius:12px;margin-bottom:10px;background:var(--panel)}
+  .srcrow .info{flex:1}.srcrow .nm{font-weight:700;font-size:15px}.srcrow .nt{font-size:12px;color:var(--muted);margin-top:3px}
+  .srcrow.off{opacity:.5}
+  .arrows{display:flex;flex-direction:column;gap:2px}
+  .arrows button{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:30px;height:22px;border-radius:6px;font-size:11px;line-height:1}
+  .switch{position:relative;width:46px;height:26px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:var(--panel2);border:1px solid var(--border);border-radius:26px;transition:.2s}
+  .slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:var(--muted);border-radius:50%;transition:.2s}
+  .switch input:checked+.slider{background:var(--good);border-color:var(--good)}
+  .switch input:checked+.slider:before{transform:translateX(20px);background:#06231a}
+  /* reader */
+  #reader{position:fixed;inset:0;background:var(--reader-bg);z-index:100;overflow-y:auto;display:none}
+  #reader.light{background:#e9e6df}
+  .rtop{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(10,10,10,.85);backdrop-filter:blur(8px);border-bottom:1px solid #222}
+  #reader.light .rtop{background:rgba(233,230,223,.9);border-color:#cbc8c0;color:#222}
+  .rtop .rtitle{flex:1;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ricon{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:9px;font-size:16px}
+  #reader.light .ricon{background:#fff;border-color:#cbc8c0;color:#222}
+  .pages{display:flex;flex-direction:column;align-items:center;padding-bottom:80px}
+  .pages img{max-width:760px;width:100%;display:block}
+  .pages.paged{height:calc(100vh - 60px);justify-content:center;padding:0}
+  .pages.paged img{max-height:calc(100vh - 80px);width:auto;max-width:100%;object-fit:contain;display:none}
+  .pages.paged img.cur{display:block}
+  .rnav{position:fixed;bottom:0;left:0;right:0;display:flex;gap:10px;justify-content:center;align-items:center;padding:12px;background:rgba(10,10,10,.85);backdrop-filter:blur(8px);border-top:1px solid #222}
+  #reader.light .rnav{background:rgba(233,230,223,.9);border-color:#cbc8c0}
+  .rnav .pgi{font-size:13px;color:var(--muted);min-width:80px;text-align:center}
+  .loading{text-align:center;color:var(--muted);padding:50px}
+  .spin{display:inline-block;width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .errbox{background:rgba(224,161,58,.12);border:1px solid var(--warn);color:#f0d4a0;padding:14px;border-radius:10px;font-size:14px;line-height:1.5}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--border);padding:10px 18px;border-radius:10px;z-index:200;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:80%}
+  .toast.show{opacity:1}
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:150;display:flex;align-items:center;justify-content:center;padding:20px}
+  .modal .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;padding:22px;max-height:86vh;overflow:auto}
+  .modal h2{margin:0 0 4px;font-size:19px}.modal p.sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+  .modal label.ck{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;margin-bottom:7px;font-size:14px;cursor:pointer}
+  .modal label.ck input{width:17px;height:17px}.modal label.ck .ct{margin-left:auto;color:var(--muted);font-size:12px}
+  .modal .fld{margin:14px 0 6px;font-size:13px;color:var(--muted)}
+  .impprog{font-size:14px;line-height:1.6;margin-top:8px}
+  .impbar{height:8px;background:var(--panel2);border-radius:6px;overflow:hidden;margin:10px 0}
+  .impbar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+  .modal .row{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="logo">MakReader</div>
+    <div class="tabs">
+      <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
+      <button class="tab" data-tab="search">Cerca</button>
+      <button class="tab" data-tab="sources">Sorgenti</button>
+    </div>
+    <div class="search">
+      <select id="srcSel" title="Sorgente di ricerca"></select>
+      <input id="searchInput" type="search" placeholder="Cerca manga…" autocomplete="off">
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="view-library"></div>
+  <div id="view-search" class="hidden"></div>
+  <div id="view-sources" class="hidden"></div>
+  <div id="view-detail" class="hidden"></div>
+</main>
+
+<div id="reader">
+  <div class="rtop">
+    <button class="ricon" id="rClose">✕</button>
+    <div class="rtitle" id="rTitle"></div>
+    <select id="rChap" title="Vai al capitolo" style="max-width:150px"></select>
+    <button class="ricon" id="rDl" title="Scarica capitolo">⬇</button>
+    <button class="ricon" id="rWidth" title="Larghezza pagina">↔</button>
+    <button class="ricon" id="rDir" title="Direzione (sinistra/destra)">⇄</button>
+    <button class="ricon" id="rMode" title="Scroll / Pagina">⇅</button>
+    <button class="ricon" id="rLight" title="Giorno / Notte">◐</button>
+  </div>
+  <div class="pages" id="rPages"></div>
+  <div class="rnav">
+    <button class="btn sec" id="rPrev">‹ Prec</button>
+    <span class="pgi" id="rPgi"></span>
+    <button class="btn sec" id="rNext">Succ ›</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<input type="file" id="malFile" accept=".xml,.gz,.xml.gz,application/gzip,text/xml" class="hidden">
+<input type="file" id="backupFile" accept="application/json,.json" class="hidden">
+<div id="importModal" class="modal hidden"><div class="box" id="importBox"></div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+let DB={follows:{},progress:{},history:[],sources:{order:[],enabled:{}},settings:{}};
+let SET={dir:"ltr",width:"M",autoHours:6,notify:false};
+let META=[];               // [{id,name,note,lang,base}]
+let curSearchSource=localStorage.getItem("searchSource")||"__all__";
+let searchGroup=localStorage.getItem("searchGroup")!=="0";
+let recentSearches=JSON.parse(localStorage.getItem("recentSearches")||"[]");
+let libFilter=localStorage.getItem("libFilter")||"__all__";
+let libSort=localStorage.getItem("libSort")||"recent";
+let libGroup=localStorage.getItem("libGroup")==="1";
+let libDensity=localStorage.getItem("libDensity")||"normal";
+let libQuery="";
+let libSelect=false, selSet=new Set(), dlCount={};
+let chapView=localStorage.getItem("chapView")||"grid";
+let curDetail=null, detailBack="library";
+function persistLib(){localStorage.setItem("libFilter",libFilter);localStorage.setItem("libSort",libSort);localStorage.setItem("libGroup",libGroup?"1":"0");localStorage.setItem("libDensity",libDensity);}
+let reader={chapters:[],idx:0,pages:[],page:0,paged:false,key:null,source:null,title:"",cover:"",ref:""};
+
+const key=(src,id)=>src+"||"+id;
+const img=(u,ref)=>"/img?url="+encodeURIComponent(u)+(ref?"&ref="+encodeURIComponent(ref):"");
+const metaOf=id=>META.find(m=>m.id===id)||{name:id};
+const srcRef=src=>(metaOf(src).base||'')+'/';   // Referer corretto per le immagini = sito sorgente
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600);}
+function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+async function jget(u){const r=await fetch(u);const d=await r.json();if(d&&d.error)throw new Error(d.error);return d;}
+async function saveDB(){await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
+
+// ---------- tabs ----------
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
+function showTab(name){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
+  ["library","search","sources","detail"].forEach(v=>$("#view-"+v).classList.toggle("hidden",v!==name));
+  if(name==="library")renderLibrary();
+  if(name==="sources")renderSources();
+}
+
+// ---------- sources ----------
+function enabledSources(){return DB.sources.order.filter(id=>DB.sources.enabled[id]);}
+function fillSourceSelect(){
+  const sel=$("#srcSel");const en=enabledSources();
+  sel.innerHTML='<option value="__all__">Tutte le sorgenti</option>'+en.map(id=>`<option value="${id}">${esc(metaOf(id).name)}</option>`).join("");
+  if(curSearchSource!=="__all__"&&!en.includes(curSearchSource))curSearchSource=en[0]||"__all__";
+  sel.value=curSearchSource;
+}
+$("#srcSel").onchange=e=>{curSearchSource=e.target.value;localStorage.setItem("searchSource",curSearchSource);const q=$("#searchInput").value.trim();if(q)doSearch(q);};
+
+function renderSources(){
+  const v=$("#view-sources");
+  v.innerHTML='<h3 class="sec">Sorgenti — attiva, disattiva e riordina (l\'ordine vale per ricerca e priorità)</h3>'+
+    DB.sources.order.map((id,i)=>{
+      const m=metaOf(id),on=DB.sources.enabled[id];
+      return `<div class="srcrow ${on?'':'off'}">
+        <div class="arrows"><button data-up="${id}" ${i===0?'disabled':''}>▲</button><button data-dn="${id}" ${i===DB.sources.order.length-1?'disabled':''}>▼</button></div>
+        <div class="info"><div class="nm">${esc(m.name)} <span style="color:var(--muted);font-weight:400;font-size:12px">${esc(m.lang||"")}</span></div><div class="nt">${esc(m.note||"")}</div></div>
+        <label class="switch"><input type="checkbox" data-tog="${id}" ${on?'checked':''}><span class="slider"></span></label>
+      </div>`;
+    }).join("")+
+    '<p style="color:var(--muted);font-size:13px;line-height:1.6;margin-top:18px">Note: <b>MangaFox</b> e <b>MangaHere</b> condividono lo stesso motore; ricerca e capitoli sono solidi, la lettura delle pagine è sperimentale. <b>MangaFire</b> non è incluso perché protetto da Cloudflare (richiederebbe un browser headless).</p>'+
+    `<h3 class="sec" style="margin-top:26px">Aggiornamenti automatici</h3>
+     <label class="ck" style="max-width:520px"><input type="checkbox" id="setNotify" ${SET.notify?'checked':''}><span>Notifiche desktop per i nuovi capitoli</span></label>
+     <div class="fld">Controlla automaticamente ogni</div>
+     <select id="setHours" style="max-width:220px">
+       ${[["0","mai (solo manuale)"],["1","1 ora"],["3","3 ore"],["6","6 ore"],["12","12 ore"],["24","24 ore"]].map(([v2,t])=>`<option value="${v2}" ${String(SET.autoHours)===v2?'selected':''}>${t}</option>`).join("")}
+     </select>
+     <p class="sub" style="margin-top:10px">Il controllo automatico funziona finché MakReader è aperto nel browser.</p>
+     <h3 class="sec" style="margin-top:26px">Aggiornamenti dell'app</h3>
+     <div><button class="btn sec" id="checkUpd">Controlla aggiornamenti</button> <span id="updMsg" class="sub" style="margin-left:8px"></span></div>`;
+  v.querySelectorAll("[data-tog]").forEach(c=>c.onchange=async()=>{DB.sources.enabled[c.dataset.tog]=c.checked;await saveSources();renderSources();});
+  v.querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>move(b.dataset.up,-1));
+  v.querySelectorAll("[data-dn]").forEach(b=>b.onclick=()=>move(b.dataset.dn,1));
+  $("#setNotify").onchange=async e=>{
+    if(e.target.checked&&window.Notification&&Notification.permission!=="granted"){const p=await Notification.requestPermission();if(p!=="granted"){e.target.checked=false;toast("Permesso notifiche negato dal browser");return;}}
+    SET.notify=e.target.checked;DB.settings=SET;saveDB();
+  };
+  $("#setHours").onchange=e=>{SET.autoHours=parseInt(e.target.value);DB.settings=SET;saveDB();scheduleAuto();};
+  $("#checkUpd").onclick=async()=>{
+    const m=$("#updMsg");m.textContent="Controllo…";
+    try{const d=await jget("/update/check");
+      if(!d.configured){m.textContent="Aggiornamenti non ancora configurati (vedi la guida GitHub).";return;}
+      if(d.update){m.innerHTML='Nuova versione '+esc(d.latest)+' disponibile. <button class="btn" id="doUpd" style="padding:5px 11px">Aggiorna ora</button>';$("#doUpd").onclick=applyUpd;}
+      else m.textContent="Sei aggiornato (versione "+esc(d.current)+").";
+    }catch(e){m.textContent="Errore nel controllo: "+esc(e.message||String(e));}
+  };
+}
+async function applyUpd(){
+  const m=$("#updMsg");m.textContent="Scarico l'aggiornamento…";
+  try{const r=await fetch("/update/apply",{method:"POST"});const d=await r.json();if(d.error)throw new Error(d.error);
+    m.innerHTML="✓ Aggiornato. Chiudi e riavvia MakReader per applicare le modifiche.";
+  }catch(e){m.textContent="Aggiornamento fallito: "+esc(e.message||String(e));}
+}
+async function move(id,d){const o=DB.sources.order,i=o.indexOf(id),j=i+d;if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];await saveSources();renderSources();}
+async function saveSources(){fillSourceSelect();await fetch("/sources",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB.sources)});}
+
+// ---------- search ----------
+let stimer;
+$("#searchInput").addEventListener("input",e=>{clearTimeout(stimer);const q=e.target.value.trim();if(q)stimer=setTimeout(()=>doSearch(q),400);});
+$("#searchInput").addEventListener("focus",()=>{showTab("search");if(!$("#searchInput").value.trim())renderSearchHome();});
+function renderSearchHome(){
+  const v=$("#view-search");
+  v.innerHTML=recentSearches.length?('<h3 class="sec">Ricerche recenti</h3>'+recentChipsHtml()):'<div class="empty">Scrivi un titolo per cercare.<br>Sorgente: <b>'+esc(curSearchSource==="__all__"?"Tutte le sorgenti":metaOf(curSearchSource).name)+'</b></div>';
+  bindRecentChips(v);
+}
+function addRecent(q){q=(q||"").trim();if(!q)return;recentSearches=[q,...recentSearches.filter(x=>x.toLowerCase()!==q.toLowerCase())].slice(0,8);localStorage.setItem("recentSearches",JSON.stringify(recentSearches));}
+function recentChipsHtml(){return recentSearches.length?('<div class="chips" style="margin-bottom:14px">'+recentSearches.map(q=>'<span class="chip" data-rq="'+esc(q)+'">'+esc(q)+'</span>').join("")+'<span class="chip" data-rclear="1">pulisci</span></div>'):"";}
+function bindRecentChips(v){
+  v.querySelectorAll("[data-rq]").forEach(c=>c.onclick=()=>{$("#searchInput").value=c.dataset.rq;doSearch(c.dataset.rq);});
+  const cc=v.querySelector("[data-rclear]");if(cc)cc.onclick=()=>{recentSearches=[];localStorage.removeItem("recentSearches");const q=$("#searchInput").value.trim();q?doSearch(q):renderSearchHome();};
+}
+function inLib(src,id){return !!DB.follows[key(src,id)];}
+function cardHtml(src,m){
+  return `<div class="card" data-src="${esc(src)}" data-id="${esc(m.id)}">
+    <span class="srcpill">${esc(metaOf(src).name)}</span>
+    ${inLib(src,m.id)?'<span class="inlib" title="In libreria">✓</span>':''}
+    ${m.cover?`<img class="cover" src="${img(m.cover,srcRef(src))}" loading="lazy" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>'}
+    <div class="meta"><div class="t">${esc(m.title)}</div><div class="s">${esc(m.status||"")}</div></div></div>`;
+}
+function bindSearchCards(c){c.querySelectorAll(".card").forEach(el=>{if(el._b)return;el._b=1;el.onclick=()=>openDetail(el.dataset.src,el.dataset.id);});}
+async function doSearch(q){
+  showTab("search");
+  addRecent(q);
+  const v=$("#view-search"), en=enabledSources();
+  if(!en.length){v.innerHTML='<div class="empty">Nessuna sorgente attiva. Vai su <b>Sorgenti</b>.</div>';return;}
+  if(curSearchSource==="__all__")return multiSearch(q,en);
+  v.innerHTML=recentChipsHtml()+'<h3 class="sec">'+esc(metaOf(curSearchSource).name)+': '+esc(q)+'</h3><div class="loading"><div class="spin"></div></div>';
+  bindRecentChips(v);
+  try{
+    const d=await jget(`/search?source=${encodeURIComponent(curSearchSource)}&q=${encodeURIComponent(q)}`);
+    const lo=v.querySelector(".loading");if(lo)lo.remove();
+    if(!d.results.length){
+      v.insertAdjacentHTML("beforeend",'<div class="empty">Nessun risultato su '+esc(metaOf(curSearchSource).name)+'.<br><button class="btn" id="extAll" style="margin-top:14px">Estendi a tutte le sorgenti</button></div>');
+      $("#extAll").onclick=()=>multiSearch(q,en);return;
+    }
+    const grid=document.createElement("div");grid.className="grid";
+    grid.innerHTML=d.results.map(m=>cardHtml(curSearchSource,m)).join("");
+    v.appendChild(grid);bindSearchCards(grid);
+  }catch(e){
+    const lo=v.querySelector(".loading");
+    const msg='<div class="errbox">Errore dalla sorgente: '+esc(e.message)+'. <button class="btn" id="extAll" style="margin-top:8px">Estendi a tutte</button></div>';
+    if(lo)lo.outerHTML=msg;else v.insertAdjacentHTML("beforeend",msg);
+    const ea=$("#extAll");if(ea)ea.onclick=()=>multiSearch(q,en);
+  }
+}
+async function multiSearch(q,en){
+  const v=$("#view-search");
+  v.innerHTML=recentChipsHtml()+
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><h3 class="sec" style="margin:0">Tutte le sorgenti: '+esc(q)+'</h3>'+
+    '<button class="btn sec" id="grpBtn" style="margin-left:auto;padding:6px 12px">'+(searchGroup?"Raggruppate":"Mescolate")+'</button></div><div id="msArea"></div>';
+  bindRecentChips(v);
+  $("#grpBtn").onclick=()=>{searchGroup=!searchGroup;localStorage.setItem("searchGroup",searchGroup?"1":"0");multiSearch(q,en);};
+  const area=$("#msArea");
+  if(searchGroup){
+    for(const s of en){
+      const sec=document.createElement("div");sec.innerHTML='<div class="fld">'+esc(metaOf(s).name)+' …</div>';area.appendChild(sec);
+      try{const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`);
+        const rs=d.results||[];
+        if(rs.length){sec.innerHTML='<div class="fld">'+esc(metaOf(s).name)+' ('+rs.length+')</div>';
+          const g=document.createElement("div");g.className="grid";g.style.marginBottom="20px";g.innerHTML=rs.map(m=>cardHtml(s,m)).join("");sec.appendChild(g);bindSearchCards(g);}
+        else sec.innerHTML='<div class="fld">'+esc(metaOf(s).name)+' — nessun risultato</div>';
+      }catch(e){sec.innerHTML='<div class="fld">'+esc(metaOf(s).name)+' — errore</div>';}
+    }
+  }else{
+    const status=document.createElement("div");status.className="fld";status.textContent="Cerco…";area.appendChild(status);
+    const grid=document.createElement("div");grid.className="grid";area.appendChild(grid);
+    let done=0;
+    await Promise.all(en.map(async s=>{
+      try{const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`);
+        const frag=(d.results||[]).map(m=>cardHtml(s,m)).join("");
+        if(frag){grid.insertAdjacentHTML("beforeend",frag);bindSearchCards(grid);}
+      }catch(e){}
+      done++;status.textContent=done<en.length?("Cerco… ("+done+"/"+en.length+")"):(grid.children.length?"":"Nessun risultato.");
+    }));
+  }
+}
+
+// ---------- detail ----------
+const CATS=["Reading","Plan to Read","Completed","On-Hold","Dropped"];
+async function openDetail(src,id,known){
+  const _at=document.querySelector(".tab.active");if(_at)detailBack=_at.dataset.tab;
+  curDetail={src,id};
+  showTab("detail");
+  const v=$("#view-detail");
+  v.innerHTML='<div class="loading"><div class="spin"></div></div>';
+  let d;
+  try{d=await jget(`/details?source=${encodeURIComponent(src)}&url=${encodeURIComponent(id)}`);}
+  catch(e){v.innerHTML=`<div class="errbox">Impossibile aprire la scheda: ${esc(e.message)}</div>`;return;}
+  await loadDownloads();
+  const k=key(src,id),f=DB.follows[k],followed=!!f;
+  const cover=d.cover||(known&&known.cover)||"";
+  const refHost=srcRef(src);
+  if(f&&d.title&&(!f.title||!f.cover)){f.title=f.title||d.title;f.cover=f.cover||cover;saveDB();}
+  const prog=DB.progress[k];
+  const resumeIdx=prog&&prog.lastChapterId?d.chapters.findIndex(c=>c.id===prog.lastChapterId):-1;
+  const resumeBtn=resumeIdx>=0?('<button class="btn" id="resumeBtn">▶ Riprendi'+(prog.lastChapterNum?(' (Cap. '+esc(prog.lastChapterNum)+')'):'')+'</button>'):'';
+  const crossBtn=enabledSources().filter(s=>s!==src).length?('<button class="btn sec" id="crossBtn">🔎 Altre sorgenti</button>'):'';
+  const malUrl=(f&&f.malId)?('https://myanimelist.net/manga/'+encodeURIComponent(f.malId)):('https://myanimelist.net/manga.php?cat=manga&q='+encodeURIComponent(d.title||(known&&known.title)||""));
+  const catSelHtml=followed?('<select id="catSel" style="padding:9px 11px">'+["",...CATS].map(c=>'<option value="'+esc(c)+'" '+((f.category||"")===c?'selected':'')+'>'+(c?esc(c):'Senza stato')+'</option>').join("")+'</select>'):'';
+  const metaBits=[d.status,d.year,d.author].filter(Boolean).map(esc).join(" · ");
+  const genresHtml=(d.genres&&d.genres.length)?('<div class="tagrow">'+d.genres.map(g=>'<span class="tag">'+esc(g)+'</span>').join("")+'</div>'):'';
+  const heroBg=cover?('<div class="bg" style="background-image:url(\''+img(cover,refHost)+'\')"></div>'):'';
+  const altHtml=(d.altTitles&&d.altTitles.length)?('<div class="alttitles">'+esc(d.altTitles.slice(0,5).join("  ·  "))+'</div>'):'';
+  const descText=(esc(d.description||"").replace(/\n/g,"<br>"))||'<span style="color:var(--muted)">Nessuna trama disponibile da questa sorgente.</span>';
+  v.innerHTML=`
+   <button class="btn sec" id="backBtn" style="margin-bottom:14px">← Indietro</button>
+   <div class="hero">${heroBg}
+   <div class="detail-head">
+     ${cover?`<img class="cover" src="${img(cover,refHost)}" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>'}
+     <div class="detail-info">
+       <h1>${esc(d.title||(known&&known.title)||"")}</h1>
+       ${altHtml}
+       <div class="alt">Sorgente: ${esc(metaOf(src).name)} · ${d.chapters.length} capitoli</div>
+       ${metaBits?`<div class="metaline">${metaBits}</div>`:''}
+       ${genresHtml}
+       <div class="actions">
+         <button class="btn ${followed?'on':''}" id="followBtn">${followed?'✓ Nella libreria':'+ Aggiungi alla libreria'}</button>
+         ${resumeBtn}
+         <button class="btn sec" id="readFirst">Leggi dall'inizio</button>
+         <button class="btn sec" id="dlAll">⬇ Scarica tutti</button>
+         ${crossBtn}
+         <button class="btn sec" id="malBtn">MAL ↗</button>
+         ${catSelHtml}
+       </div>
+     </div>
+   </div>
+   </div>
+   <details class="malbox" id="malBox"><summary>Info da MyAnimeList</summary><div class="malc" id="malContent"></div></details>
+   <div style="margin-top:20px"><h3 style="font-size:15px;margin:0 0 8px">Trama</h3>
+     <div class="desc clamp" id="descBox">${descText}</div>
+     <button class="descmore hidden" id="descMore">Mostra tutto ▾</button></div>
+   <div class="chapters"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><h3 style="margin:0">Capitoli</h3><button class="btn sec" id="chapViewBtn" style="margin-left:auto;padding:6px 12px"></button></div><div id="chapList"></div></div>`;
+  const db=$("#descBox"),dmore=$("#descMore");
+  if(db.scrollHeight>db.clientHeight+8){dmore.classList.remove("hidden");dmore.onclick=()=>{const open=db.classList.toggle("clamp");dmore.textContent=open?"Mostra tutto ▾":"Mostra meno ▴";};}
+  const cl=$("#chapList");
+  const malRead=f&&f.malRead?parseFloat(f.malRead):0;
+  const readSet=new Set((prog&&prog.readChapters)||[]);
+  const baseIdx=(f&&f.lastChapterId)?d.chapters.findIndex(c=>c.id===f.lastChapterId):-1;
+  const curId=prog&&prog.lastChapterId;
+  function chState(c,i){
+    if(curId&&c.id===curId)return "cur";
+    if(baseIdx>=0&&i>baseIdx)return "new";
+    if(readSet.has(c.id)||(malRead&&c.number&&parseFloat(c.number||0)<=malRead))return "read";
+    return "un";
+  }
+  const dlChapter=async(b,c)=>{await downloadChapters([{source:src,chapter_id:c.id,manga_key:k,title:d.title,chapter_name:c.name||('Cap. '+c.number)}]);if(b)b.textContent="in coda";toast("Download avviato");};
+  function paintChapters(){
+    const vb=$("#chapViewBtn");if(vb)vb.textContent=chapView==="grid"?"☰ Righe":"▦ Griglia";
+    if(!d.chapters.length){cl.innerHTML='<div class="empty">Nessun capitolo.</div>';return;}
+    if(chapView==="grid"){
+      const items=d.chapters.map((c,i)=>({c,i})).reverse();
+      cl.innerHTML='<div class="cgrid">'+items.map(o=>{
+        const st=chState(o.c,o.i),dl=DLSET.has(src+"::"+o.c.id);
+        const lbl=o.c.number?esc(o.c.number):esc((o.c.name||"?").slice(0,8));
+        return '<div class="ctile '+st+(dl?' dl':'')+'" data-i="'+o.i+'" title="'+esc(o.c.name||('Cap. '+o.c.number))+'">'+lbl+'</div>';
+      }).join("")+'</div>';
+      cl.querySelectorAll(".ctile").forEach(el=>el.onclick=()=>openReader(src,d.chapters,+el.dataset.i,k,d.title,cover,refHost));
+    }else{
+      cl.innerHTML=d.chapters.map((c,i)=>{
+        const st=chState(c,i),dl=DLSET.has(src+"::"+c.id);
+        return '<div class="chap '+(st==="read"?"read ":"")+'st-'+st+'" data-i="'+i+'">'+
+          (st==="cur"?'<span class="dot" title="In lettura"></span>':'')+
+          '<span class="num">'+esc(c.name||('Cap. '+c.number))+'</span><span class="ti"></span>'+
+          '<button class="cdl '+(dl?"done":"")+'" data-dl="'+i+'">'+(dl?"✓ offline":"⬇")+'</button></div>';
+      }).join("");
+      cl.querySelectorAll(".chap").forEach(el=>el.onclick=e=>{if(e.target.dataset.dl!==undefined)return;openReader(src,d.chapters,+el.dataset.i,k,d.title,cover,refHost);});
+      cl.querySelectorAll("[data-dl]").forEach(b=>b.onclick=async e=>{e.stopPropagation();dlChapter(b,d.chapters[+b.dataset.dl]);});
+    }
+  }
+  paintChapters();
+  {const vb=$("#chapViewBtn");if(vb)vb.onclick=()=>{chapView=chapView==="grid"?"rows":"grid";localStorage.setItem("chapView",chapView);paintChapters();};}
+  $("#followBtn").onclick=()=>toggleFollow(src,id,d,cover);
+  $("#readFirst").onclick=()=>{if(d.chapters.length)openReader(src,d.chapters,0,k,d.title,cover,refHost);};
+  if(resumeIdx>=0)$("#resumeBtn").onclick=()=>openReader(src,d.chapters,resumeIdx,k,d.title,cover,refHost,prog.lastPage||0);
+  $("#dlAll").onclick=async()=>{if(!d.chapters.length)return;if(confirm(`Scaricare tutti i ${d.chapters.length} capitoli? Può richiedere tempo.`)){await downloadChapters(d.chapters.map(c=>({source:src,chapter_id:c.id,manga_key:k,title:d.title,chapter_name:c.name||('Cap. '+c.number)})));toast("Download in coda");}};
+  const cs=$("#catSel");if(cs)cs.onchange=()=>{DB.follows[k].category=cs.value;saveDB();toast("Stato aggiornato");};
+  const cb=$("#crossBtn");if(cb)cb.onclick=()=>crossSearch(d.title||(known&&known.title)||"",src,followed?k:null);
+  const mb=$("#malBtn");if(mb)mb.onclick=()=>window.open(malUrl,"_blank");
+  $("#backBtn").onclick=()=>showTab(detailBack||"library");
+  const malBox=$("#malBox");
+  if(malBox)malBox.addEventListener("toggle",()=>{if(malBox.open&&!malBox.dataset.loaded){malBox.dataset.loaded="1";loadMal(f&&f.malId,d.title||(known&&known.title)||"");}});
+}
+// cerca lo stesso titolo sulle altre sorgenti attive
+let csList=[];
+async function crossSearch(title,fromSrc,mangaKey){
+  const others=enabledSources().filter(s=>s!==fromSrc);
+  const box=$("#importBox");$("#importModal").classList.remove("hidden");
+  box.innerHTML=`<h2>Trova su altre sorgenti</h2><p class="sub">Cerco “${esc(title)}” su: ${others.map(s=>esc(metaOf(s).name)).join(", ")||"nessun'altra sorgente attiva"}</p><div id="csArea"></div><div class="row"><button class="btn sec" id="csClose">Chiudi</button></div>`;
+  $("#csClose").onclick=()=>$("#importModal").classList.add("hidden");
+  const area=$("#csArea");csList=[];let html="";
+  if(!others.length){area.innerHTML='<div class="empty">Attiva altre sorgenti in <b>Sorgenti</b>.</div>';return;}
+  for(const s of others){
+    html+=`<div class="fld">${esc(metaOf(s).name)}</div>`;
+    area.innerHTML=html+'<div class="loading"><div class="spin"></div></div>';
+    try{
+      const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(title)}`);
+      const rs=(d.results||[]).slice(0,4);
+      if(!rs.length)html+='<div class="sub" style="margin-bottom:6px">nessun risultato</div>';
+      else rs.forEach(r=>{const i=csList.length;csList.push({s,r,mangaKey});html+=csRow(i);});
+    }catch(e){html+=`<div class="sub" style="margin-bottom:6px">errore: ${esc(e.message)}</div>`;}
+    area.innerHTML=html;
+  }
+  area.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{const x=csList[+b.dataset.open];$("#importModal").classList.add("hidden");openDetail(x.s,x.r.id,x.r);});
+  area.querySelectorAll("[data-mig]").forEach(b=>b.onclick=()=>{const x=csList[+b.dataset.mig];migrateFollow(x.mangaKey,x.s,x.r);$("#importModal").classList.add("hidden");openDetail(x.s,x.r.id,x.r);});
+  fillCrossLatest(area);
+}
+function csRow(i){
+  const x=csList[i],r=x.r;
+  return '<div class="srcrow"><div class="info" style="display:flex;gap:10px;align-items:center">'+
+    (r.cover?'<img src="'+img(r.cover,srcRef(x.s))+'" style="width:34px;height:48px;object-fit:cover;border-radius:4px" onerror="this.style.visibility=\'hidden\'">':'')+
+    '<div><div class="nm" style="font-size:14px">'+esc(r.title)+'</div><div class="nt cschap" data-ci="'+i+'">controllo capitoli…</div></div></div>'+
+    '<button class="btn sec" data-open="'+i+'" style="padding:6px 12px">Apri</button>'+
+    (x.mangaKey?'<button class="btn" data-mig="'+i+'" style="padding:6px 12px" title="Sposta la voce di libreria su questa sorgente">Migra qui</button>':'')+
+    '</div>';
+}
+function fillCrossLatest(area){
+  csList.forEach((x,i)=>{
+    jget(`/latest?source=${encodeURIComponent(x.s)}&url=${encodeURIComponent(x.r.id)}`)
+      .then(d=>{const el=area.querySelector('.cschap[data-ci="'+i+'"]');if(el)el.textContent=d.number?("fino al Cap. "+d.number):"capitoli n/d";})
+      .catch(()=>{const el=area.querySelector('.cschap[data-ci="'+i+'"]');if(el)el.textContent="capitoli n/d";});
+  });
+}
+function migrateFollow(oldKey,newSrc,r){
+  const old=DB.follows[oldKey]||{};
+  const nk=key(newSrc,r.id);
+  delete DB.follows[oldKey];
+  DB.follows[nk]={source:newSrc,id:r.id,title:r.title||old.title||"",cover:r.cover||old.cover||"",category:old.category||"",malRead:old.malRead||0,lastChapterId:null};
+  saveDB();toast("Migrato su "+metaOf(newSrc).name);
+}
+function malContentHtml(m){
+  let h="";
+  const alt=[];
+  if(m.english)alt.push(["English",m.english]);
+  if(m.japanese)alt.push(["Japanese",m.japanese]);
+  if(m.synonyms&&m.synonyms.length)alt.push(["Synonyms",m.synonyms.join(", ")]);
+  if(alt.length)h+='<div class="malh">Alternative titles</div>'+alt.map(r=>'<div class="malrow"><b>'+esc(r[0])+':</b> '+esc(r[1])+'</div>').join("");
+  if(m.info&&m.info.length)h+='<div class="malh">Information</div>'+m.info.map(r=>'<div class="malrow"><b>'+esc(r[0])+':</b> '+esc(r[1])+'</div>').join("");
+  if(m.synopsis)h+='<div class="malh">Synopsis</div><div class="malsyn">'+esc(m.synopsis).replace(/\n/g,"<br>")+'</div>';
+  if(m.url)h+='<div style="margin-top:12px"><a href="'+esc(m.url)+'" target="_blank" class="btn sec" style="padding:6px 12px;display:inline-block">Apri su MyAnimeList ↗</a></div>';
+  return h||'<div class="malrow">Nessun dettaglio disponibile.</div>';
+}
+async function loadMal(id,title){
+  const c=$("#malContent");if(!c)return;
+  c.innerHTML='<div class="loading"><div class="spin"></div></div>';
+  try{
+    const u=id?("/mal?id="+encodeURIComponent(id)):("/mal?title="+encodeURIComponent(title));
+    const d=await jget(u);
+    c.innerHTML=d.found?malContentHtml(d.mal):'<div class="malrow">Nessun dato trovato su MyAnimeList per questo titolo.</div>';
+  }catch(e){c.innerHTML='<div class="malrow">Errore nel recupero da MAL: '+esc(e.message)+'</div>';}
+}
+async function resumeReading(src,id){
+  const k=key(src,id),prog=DB.progress[k];
+  try{const d=await jget(`/details?source=${encodeURIComponent(src)}&url=${encodeURIComponent(id)}`);
+    let idx=0;if(prog&&prog.lastChapterId){const j=d.chapters.findIndex(c=>c.id===prog.lastChapterId);if(j>=0)idx=j;}
+    openReader(src,d.chapters,idx,k,d.title,d.cover||"",srcRef(src),prog?prog.lastPage||0:0);
+  }catch(e){openDetail(src,id);}
+}
+async function toggleFollow(src,id,d,cover){
+  const k=key(src,id);
+  if(DB.follows[k]){delete DB.follows[k];toast("Rimosso dalla libreria");}
+  else{DB.follows[k]={source:src,id,title:d.title,cover,category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null};toast("Aggiunto ✓");}
+  await saveDB();
+  const b=$("#followBtn");if(!b)return;
+  const on=!!DB.follows[k];
+  b.classList.toggle("on",on);b.textContent=on?'✓ Nella libreria':'+ Aggiungi alla libreria';
+  const actions=b.parentElement;let sel=$("#catSel");
+  if(on&&!sel){
+    sel=document.createElement("select");sel.id="catSel";sel.style.padding="9px 11px";
+    sel.innerHTML=["",...CATS].map(c=>'<option value="'+esc(c)+'">'+(c||"Senza stato")+'</option>').join("");
+    sel.value=DB.follows[k].category||"";
+    sel.onchange=()=>{if(DB.follows[k]){DB.follows[k].category=sel.value;saveDB();toast("Stato aggiornato");}};
+    actions.appendChild(sel);
+  }else if(!on&&sel){sel.remove();}
+}
+
+// ---------- library ----------
+function renderLibrary(){
+  const v=$("#view-library");
+  const ids=Object.keys(DB.follows);
+  let html='<div class="toolbar"><button class="btn sec" id="importMal">⬇ Importa da MyAnimeList</button>'+
+    (ids.length?'<button class="btn sec" id="updBtn">🔄 Cerca aggiornamenti</button>':'')+
+    '<button class="btn sec" id="dlBtn">⬇ Download</button>'+
+    (ids.length?`<button class="btn sec" id="clearLib">🗑 Svuota (${ids.length})</button>`:'')+
+    (ids.length?`<button class="btn sec ${libGroup?'on':''}" id="groupBtn">▦ Categorie</button>`:'')+
+    (ids.length?`<button class="btn sec ${libSelect?'on':''}" id="selBtn">☑ Seleziona</button>`:'')+
+    `<button class="btn sec" id="backupBtn">⤓ Backup</button>`+
+    `<button class="btn sec" id="restoreBtn">⤒ Ripristina</button>`+
+    (ids.length?`<input id="libSearch" type="search" placeholder="Filtra…" autocomplete="off" value="${esc(libQuery)}" style="margin-left:auto;width:160px">`:'')+
+    (ids.length?`<button class="btn sec" id="densBtn" title="Densità griglia">${libDensity==='compact'?'▦':'▥'}</button>`:'')+
+    (ids.length?`<select id="sortSel" style="padding:9px 11px"><option value="recent">Recenti</option><option value="alpha">A-Z</option><option value="unread">Non letti</option><option value="updated">Aggiornati</option></select>`:'')+'</div>';
+  if(DB.history.length&&!libQuery.trim()&&!libSelect){
+    html+='<h3 class="sec">Continua a leggere</h3><div class="grid" style="margin-bottom:28px">'+
+      DB.history.slice(0,6).map(h=>cardMini(h,{resume:true})).join("")+'</div>';
+  }
+  if(!ids.length){html+='<div class="empty">Libreria vuota. Usa <b>Cerca</b> per trovare un manga, o gestisci le fonti in <b>Sorgenti</b>.</div>';v.innerHTML=html;bindLib(v);return;}
+  // conteggio capitoli scaricati per manga (indicatore offline)
+  dlCount={};DLITEMS.forEach(i=>{if(i.status==="done")dlCount[i.manga_key]=(dlCount[i.manga_key]||0)+1;});
+  // barra azioni in blocco
+  if(libSelect)html+='<div class="bulkbar"><span class="cnt">'+selSet.size+' selezionati</span>'+
+    '<select id="bkCat" style="padding:7px 10px"><option value="">Sposta in stato…</option>'+["",...CATS].map(c=>'<option value="'+esc(c)+'">'+(c||"Senza stato")+'</option>').join("")+'</select>'+
+    '<button class="btn sec" id="bkRead" style="padding:7px 12px">Segna in pari</button>'+
+    '<button class="btn sec" id="bkDl" style="padding:7px 12px">⬇ Scarica</button>'+
+    '<button class="btn sec" id="bkRm" style="padding:7px 12px">🗑 Rimuovi</button>'+
+    '<button class="btn sec" id="bkAll" style="padding:7px 12px">Tutti</button>'+
+    '<button class="btn sec" id="bkNone" style="padding:7px 12px">Nessuno</button></div>';
+  const dens=libDensity==="compact"?" compact":"";
+  const q=libQuery.trim().toLowerCase();
+  let arr=ids.map(k=>({k,o:DB.follows[k],p:DB.progress[k]||{}}));
+  if(q)arr=arr.filter(x=>(x.o.title||"").toLowerCase().includes(q));
+  const sortFn=(a,b)=>libSort==="alpha"?(a.o.title||"").localeCompare(b.o.title||"")
+    :libSort==="unread"?((b.o.unread||0)-(a.o.unread||0))
+    :libSort==="updated"?((parseFloat(b.o.latestNum)||0)-(parseFloat(a.o.latestNum)||0))
+    :((b.p.lastReadAt||0)-(a.p.lastReadAt||0));
+  if(libGroup){
+    const order=["Reading","Plan to Read","Completed","On-Hold","Dropped"];
+    const groups={};arr.forEach(x=>{const c=x.o.category||"Senza stato";(groups[c]=groups[c]||[]).push(x);});
+    const gk=Object.keys(groups).sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);});
+    if(!arr.length)html+='<div class="empty">Nessun risultato.</div>';
+    gk.forEach(c=>{const list=groups[c].slice().sort(sortFn);
+      html+='<h3 class="sec">'+esc(c)+' ('+list.length+')</h3><div class="grid'+dens+'" style="margin-bottom:22px">'+list.map(x=>cardMini(x.o,{rm:true})).join("")+'</div>';});
+  }else{
+    const newCount=ids.filter(k=>(DB.follows[k].unread||0)>0).length;
+    const cats=[...new Set(ids.map(k=>DB.follows[k].category||""))];
+    let chips='<span class="chip '+(libFilter==="__all__"?"on":"")+'" data-cat="__all__">Tutti</span>';
+    if(newCount)chips+='<span class="chip '+(libFilter==="__new__"?"on":"")+'" data-cat="__new__">Novità ('+newCount+')</span>';
+    chips+=cats.map(c=>'<span class="chip '+(libFilter===c?"on":"")+'" data-cat="'+esc(c)+'">'+(c||"Senza stato")+'</span>').join("");
+    html+='<div class="chips">'+chips+'</div>';
+    let farr=arr.slice();
+    if(libFilter==="__new__")farr=farr.filter(x=>(x.o.unread||0)>0);
+    else if(libFilter!=="__all__")farr=farr.filter(x=>(x.o.category||"")===libFilter);
+    farr.sort(sortFn);
+    html+='<h3 class="sec">La mia libreria ('+farr.length+')</h3><div class="grid'+dens+'">'+(farr.length?farr.map(x=>cardMini(x.o,{rm:true})).join(""):'<div class="empty">Nessun risultato.</div>')+'</div>';
+  }
+  v.innerHTML=html;
+  if(libQuery){const e=$("#libSearch");if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}}
+  const ss=$("#sortSel");if(ss){ss.value=libSort;ss.onchange=()=>{libSort=ss.value;persistLib();renderLibrary();};}
+  v.querySelectorAll("[data-cat]").forEach(c=>c.onclick=()=>{libFilter=c.dataset.cat;persistLib();renderLibrary();});
+  bindLib(v);
+}
+function bindLib(v){
+  $("#importMal").onclick=()=>$("#malFile").click();
+  $("#dlBtn").onclick=openDownloadsModal;
+  $("#backupBtn").onclick=exportLibrary;
+  $("#restoreBtn").onclick=()=>$("#backupFile").click();
+  const ub=$("#updBtn");if(ub)ub.onclick=checkUpdatesManual;
+  const gb=$("#groupBtn");if(gb)gb.onclick=()=>{libGroup=!libGroup;persistLib();renderLibrary();};
+  const db2=$("#densBtn");if(db2)db2.onclick=()=>{libDensity=libDensity==="compact"?"normal":"compact";persistLib();renderLibrary();};
+  const sb=$("#selBtn");if(sb)sb.onclick=()=>{libSelect=!libSelect;if(!libSelect)selSet.clear();renderLibrary();};
+  const lsr=$("#libSearch");if(lsr)lsr.oninput=()=>{libQuery=lsr.value;renderLibrary();};
+  const cl=$("#clearLib");if(cl)cl.onclick=async()=>{if(confirm("Svuotare tutta la libreria? (cronologia e progressi restano)")){DB.follows={};await saveDB();renderLibrary();}};
+  const bind=(id,fn)=>{const e=$("#"+id);if(e)e.onclick=fn;};
+  bind("bkAll",()=>{Object.keys(DB.follows).forEach(k=>selSet.add(k));renderLibrary();});
+  bind("bkNone",()=>{selSet.clear();renderLibrary();});
+  bind("bkRm",async()=>{if(!selSet.size)return;if(confirm("Rimuovere "+selSet.size+" manga dalla libreria?")){selSet.forEach(k=>delete DB.follows[k]);selSet.clear();await saveDB();renderLibrary();}});
+  bind("bkRead",async()=>{selSet.forEach(k=>{if(DB.follows[k])DB.follows[k].unread=0;});await saveDB();renderLibrary();toast("Segnati in pari");});
+  bind("bkDl",async()=>{if(!selSet.size)return;if(confirm("Scaricare TUTTI i capitoli di "+selSet.size+" manga? Può essere molto pesante."))bulkDownload([...selSet]);});
+  const bc=$("#bkCat");if(bc)bc.onchange=async()=>{selSet.forEach(k=>{if(DB.follows[k])DB.follows[k].category=bc.value;});await saveDB();renderLibrary();toast("Stato aggiornato");};
+  v.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async e=>{e.stopPropagation();delete DB.follows[b.dataset.rm];await saveDB();renderLibrary();});
+  v.querySelectorAll(".card").forEach(el=>el.onclick=e=>{
+    if(e.target.closest("[data-rm]"))return;
+    const k=el.dataset.key;
+    if(libSelect&&k){selSet.has(k)?selSet.delete(k):selSet.add(k);renderLibrary();return;}
+    el.dataset.resume==="1"?resumeReading(el.dataset.src,el.dataset.id):openDetail(el.dataset.src,el.dataset.id);
+  });
+}
+function exportLibrary(){
+  const blob=new Blob([JSON.stringify(DB,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="makreader-libreria-"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);toast("Backup esportato");
+}
+async function bulkDownload(keys){
+  toast("Preparo i download…");let total=0;
+  for(const k of keys){const f=DB.follows[k];if(!f)continue;
+    try{const d=await jget(`/details?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
+      if(d.chapters.length){await downloadChapters(d.chapters.map(c=>({source:f.source,chapter_id:c.id,manga_key:k,title:d.title,chapter_name:c.name||('Cap. '+c.number)})));total+=d.chapters.length;}
+    }catch(e){}
+  }
+  toast(total+" capitoli messi in coda");
+}
+function cardMini(o,opts){
+  opts=opts||{};
+  const un=o.unread||0;
+  const p=DB.progress[key(o.source,o.id)]||{};
+  const read=p.lastChapterNum,avail=o.latestNum;
+  let sline="";
+  if(opts.resume)sline=o.chapterNum?("Cap. "+esc(o.chapterNum)):"";
+  else if(read||avail)sline=(read?esc(read):"–")+" / "+(avail?esc(avail):"?");
+  const mk=key(o.source,o.id),seld=selSet.has(mk),dln=dlCount[mk]||0;
+  return `<div class="card${seld?' sel':''}" data-key="${esc(mk)}" data-src="${esc(o.source)}" data-id="${esc(o.id)}" ${opts.resume?'data-resume="1"':''}>
+    <span class="srcpill">${esc(metaOf(o.source).name)}</span>
+    ${(!opts.resume&&libSelect)?`<span class="selbox">${seld?'✓':''}</span>`:''}
+    ${(!opts.resume&&dln>0)?`<span class="dlpill">⬇ ${dln}</span>`:''}
+    ${opts.rm?`<button class="rmbtn" data-rm="${esc(key(o.source,o.id))}" title="Rimuovi dalla libreria">✕</button>`:''}
+    ${(!opts.resume&&un>0)?`<span class="unread">${un}</span>`:''}
+    ${o.cover?`<img class="cover" src="${img(o.cover,srcRef(o.source))}" loading="lazy" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>'}
+    <div class="meta"><div class="t">${esc(o.title)||'<span style=\"color:var(--muted)\">(apri per il titolo)</span>'}</div>${sline?`<div class="s" title="letto / disponibile">${sline}</div>`:''}</div></div>`;
+}
+
+// ---------- updates ----------
+async function renderUpdates(){
+  const v=$("#view-updates");const ids=Object.keys(DB.follows);
+  if(!ids.length){v.innerHTML='<div class="empty">Aggiungi manga alla libreria per controllare i nuovi capitoli.</div>';return;}
+  v.innerHTML='<div class="loading"><div class="spin"></div> &nbsp;Controllo nuovi capitoli…</div>';
+  const upd=[];
+  for(const k of ids){const f=DB.follows[k];
+    try{const d=await jget(`/details?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
+      if(!d.chapters.length)continue;
+      const latest=d.chapters[d.chapters.length-1];
+      f.latestNum=latest.number;
+      const idx=f.lastChapterId?d.chapters.findIndex(c=>c.id===f.lastChapterId):-1;
+      const unread=idx>=0?(d.chapters.length-1-idx):(f.lastChapterId?d.chapters.length:0);
+      f.unread=unread;
+      if(unread>0)upd.push({k,f,latest,unread});
+    }catch(e){}
+  }
+  await saveDB();
+  setBadge(Object.values(DB.follows).filter(f=>f.unread>0).length);
+  if(!upd.length){v.innerHTML='<h3 class="sec">Aggiornamenti</h3><div class="empty">Sei aggiornato! ✓</div>';return;}
+  upd.sort((a,b)=>b.unread-a.unread);
+  v.innerHTML='<h3 class="sec">Nuovi capitoli</h3><div class="grid">'+upd.map(u=>{
+    const o=u.f;
+    return `<div class="card update" data-src="${esc(o.source)}" data-id="${esc(o.id)}">
+      <span class="srcpill">${esc(metaOf(o.source).name)}</span>
+      <span class="unread">+${u.unread}</span>
+      ${o.cover?`<img class="cover" src="${img(o.cover,srcRef(o.source))}" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>'}
+      <div class="meta"><div class="t">${esc(o.title)}</div><div class="s">Nuovo: ${esc(u.latest.name||('Cap. '+u.latest.number))}</div></div></div>`;
+  }).join("")+'</div>';
+  v.querySelectorAll(".card").forEach(el=>el.onclick=()=>openDetail(el.dataset.src,el.dataset.id));
+}
+function setBadge(n){const b=$("#updBadge");if(n>0){b.textContent=n;b.classList.remove("hidden");}else b.classList.add("hidden");}
+
+// ---------- reader ----------
+const WIDTHS={S:560,M:760,L:1040};
+async function openReader(src,chapters,idx,mangaKey,title,cover,ref,startPage){
+  reader={chapters,idx,pages:[],page:0,paged:reader.paged,key:mangaKey,source:src,title,cover,ref:"",resume:startPage||0,offline:false};
+  $("#reader").style.display="block";
+  $("#rChap").innerHTML=chapters.map((c,i)=>`<option value="${i}">${esc(c.name||('Cap. '+c.number))}</option>`).join("");
+  await loadChapter();
+}
+async function loadChapter(){
+  const ch=reader.chapters[reader.idx];
+  $("#rChap").value=reader.idx;
+  $("#rTitle").textContent=reader.title+"  ·  "+(ch.name||("Cap. "+ch.number));
+  const pg=$("#rPages");pg.innerHTML='<div class="loading"><div class="spin"></div></div>';$("#reader").scrollTop=0;
+  try{
+    const d=await jget(`/pages?source=${encodeURIComponent(reader.source)}&url=${encodeURIComponent(ch.id)}`);
+    reader.ref=d.referer||"";reader.offline=!!d.offline;
+    reader.pages=d.pages.map(u=>u.indexOf("/file?")===0?u:img(u,d.referer));
+    reader.page=Math.min(reader.resume||0,Math.max(0,reader.pages.length-1));reader.resume=0;
+    renderPages();updateDlBtn();markRead(ch);recordHistory(ch);
+    if(!reader.paged&&reader.page>0)setTimeout(()=>scrollToPage(reader.page),60);
+  }catch(e){
+    pg.innerHTML=`<div class="errbox" style="margin:20px">Impossibile caricare le pagine da ${esc(metaOf(reader.source).name)}.<br><br>${esc(e.message)}<br><br>Suggerimento: prova lo stesso manga da un'altra sorgente (es. WeebCentral), oppure passa al capitolo successivo.</div>`;
+  }
+}
+function renderPages(){
+  const pg=$("#rPages");pg.className="pages"+(reader.paged?" paged":"");
+  if(!reader.pages.length){pg.innerHTML='<div class="errbox" style="margin:20px">Nessuna pagina trovata.</div>';return;}
+  const w=WIDTHS[SET.width]||760;
+  pg.innerHTML=reader.pages.map((u,i)=>`<img src="${u}" loading="${reader.paged?'eager':'lazy'}" style="max-width:${w}px" class="${reader.paged&&i===reader.page?'cur':''}">`).join("");
+  if(reader.paged)pg.onclick=e=>{const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl')?!right:right)?nextPage():prevPage();};else pg.onclick=null;
+  updatePgi();if(reader.paged)preload();
+}
+function preload(){const n=reader.page+1;if(n<reader.pages.length){const im=new Image();im.src=reader.pages[n];}}
+function scrollToPage(i){const im=document.querySelectorAll("#rPages img")[i];if(im)$("#reader").scrollTop=im.offsetTop-50;}
+function showPage(i){reader.page=Math.max(0,Math.min(reader.pages.length-1,i));document.querySelectorAll("#rPages img").forEach((im,k)=>im.classList.toggle("cur",k===reader.page));updatePgi();preload();saveProgress();}
+function nextPage(){if(reader.paged){reader.page<reader.pages.length-1?showPage(reader.page+1):nextChapter();}}
+function prevPage(){if(reader.paged){reader.page>0?showPage(reader.page-1):prevChapter();}}
+function updatePgi(){$("#rPgi").textContent=reader.paged?`${reader.page+1} / ${reader.pages.length}`:`${reader.pages.length} pagine`;}
+function nextChapter(){reader.idx<reader.chapters.length-1?(reader.idx++,loadChapter()):toast("Ultimo capitolo");}
+function prevChapter(){reader.idx>0?(reader.idx--,loadChapter()):toast("Primo capitolo");}
+let saveT;
+function saveProgress(){clearTimeout(saveT);saveT=setTimeout(()=>{const k=reader.key;if(!k||!reader.chapters[reader.idx])return;const p=DB.progress[k]=DB.progress[k]||{readChapters:[]};p.lastChapterId=reader.chapters[reader.idx].id;p.lastChapterNum=reader.chapters[reader.idx].number;p.lastPage=reader.page;p.lastReadAt=Date.now();saveDB();},700);}
+function markRead(ch){const k=reader.key;if(!DB.progress[k])DB.progress[k]={readChapters:[]};const p=DB.progress[k];p.readChapters=p.readChapters||[];if(!p.readChapters.includes(ch.id))p.readChapters.push(ch.id);p.lastChapterId=ch.id;p.lastChapterNum=ch.number;p.lastPage=reader.page;p.lastReadAt=Date.now();if(DB.follows[k]){DB.follows[k].lastChapterId=ch.id;DB.follows[k].unread=0;}saveDB();}
+function recordHistory(ch){const k=reader.key;DB.history=DB.history.filter(h=>key(h.source,h.id)!==k);DB.history.unshift({source:reader.source,id:reader.key.split("||").slice(1).join("||"),title:reader.title,cover:reader.cover,chapterNum:ch.number});DB.history=DB.history.slice(0,20);saveDB();}
+function updateDlBtn(){const b=$("#rDl");if(reader.offline){b.textContent="✓";b.title="Capitolo scaricato";}else{b.textContent="⬇";b.title="Scarica questo capitolo";}}
+
+$("#rClose").onclick=()=>{
+  $("#reader").style.display="none";
+  if(curDetail&&!$("#view-detail").classList.contains("hidden")){openDetail(curDetail.src,curDetail.id);return;}
+  const at=document.querySelector(".tab.active");showTab(at?at.dataset.tab:"library");
+};
+$("#rPrev").onclick=()=>reader.paged?prevPage():prevChapter();
+$("#rNext").onclick=()=>reader.paged?nextPage():nextChapter();
+$("#rMode").onclick=()=>{reader.paged=!reader.paged;renderPages();if(!reader.paged&&reader.page>0)setTimeout(()=>scrollToPage(reader.page),60);toast(reader.paged?"Modalità pagina":"Modalità scroll");};
+$("#rLight").onclick=()=>$("#reader").classList.toggle("light");
+$("#rChap").onchange=e=>{reader.idx=+e.target.value;loadChapter();};
+$("#rDir").onclick=()=>{SET.dir=SET.dir==="rtl"?"ltr":"rtl";saveSettings();renderPages();toast(SET.dir==="rtl"?"Lettura ←  destra→sinistra":"Lettura →  sinistra→destra");};
+$("#rWidth").onclick=()=>{const o=["S","M","L"];SET.width=o[(o.indexOf(SET.width)+1)%3];saveSettings();renderPages();toast("Larghezza: "+SET.width);};
+$("#rDl").onclick=async()=>{const ch=reader.chapters[reader.idx];await downloadChapters([{source:reader.source,chapter_id:ch.id,manga_key:reader.key,title:reader.title,chapter_name:ch.name||("Cap. "+ch.number)}]);toast("Download avviato");};
+$("#reader").addEventListener("scroll",()=>{if($("#reader").style.display!=="block"||reader.paged)return;const imgs=document.querySelectorAll("#rPages img");const mid=$("#reader").scrollTop+innerHeight/2;for(let i=0;i<imgs.length;i++){if(imgs[i].offsetTop<=mid&&imgs[i].offsetTop+imgs[i].offsetHeight>=mid){reader.page=i;break;}}updatePgi();saveProgress();});
+document.addEventListener("keydown",e=>{if($("#reader").style.display!=="block")return;
+  const fwd=e.key==="ArrowRight",back=e.key==="ArrowLeft";
+  if(fwd||back){const goNext=(SET.dir==="rtl")?back:fwd;reader.paged?(goNext?nextPage():prevPage()):(goNext?nextChapter():prevChapter());}
+  if(e.key==="Escape")$("#rClose").click();});
+
+// ---------- download offline ----------
+let DLITEMS=[],DLSET=new Set();
+async function loadDownloads(){try{const d=await jget("/downloads");DLITEMS=d.items||[];DLSET=new Set(DLITEMS.filter(i=>i.status==="done").map(i=>i.source+"::"+i.chapter_id));}catch(e){}}
+async function downloadChapters(items){await fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(items)});setTimeout(loadDownloads,1500);}
+function openDownloadsModal(){
+  loadDownloads().then(()=>{
+    const box=$("#importBox");
+    const sorted=[...DLITEMS].sort((a,b)=>(b.ts||0)-(a.ts||0));
+    box.innerHTML=`<h2>Download offline</h2><p class="sub">${sorted.filter(i=>i.status==='done').length} capitoli scaricati. I capitoli scaricati si leggono senza connessione.</p>
+      <div style="max-height:56vh;overflow:auto">${sorted.length?sorted.map(i=>{
+        const st=i.status==="done"?`<span style="color:var(--good)">✓ scaricato</span>`:i.status==="downloading"?`scarico ${i.done}/${i.total}`:i.status==="error"?`<span style="color:var(--warn)">errore</span>`:"in coda";
+        return `<div class="srcrow"><div class="info"><div class="nm" style="font-size:14px">${esc(i.title||"?")}</div><div class="nt">${esc(i.chapter_name||"")} · ${esc(metaOf(i.source).name)} · ${st}</div></div><button class="ricon" data-del="${i.id}" title="Elimina">🗑</button></div>`;
+      }).join(""):'<div class="empty">Nessun download.</div>'}</div>
+      <div class="row"><button class="btn sec" id="dlRefresh">Aggiorna</button><button class="btn" id="dlClose">Chiudi</button></div>`;
+    $("#importModal").classList.remove("hidden");
+    $("#dlClose").onclick=()=>$("#importModal").classList.add("hidden");
+    $("#dlRefresh").onclick=openDownloadsModal;
+    box.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{await fetch("/download/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:b.dataset.del})});openDownloadsModal();});
+  });
+}
+
+// ---------- settings + auto-check ----------
+function saveSettings(){fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
+async function autoCheck(notify){
+  let newCount=0;
+  const keys=Object.keys(DB.follows), LIMIT=6;
+  let i=0;
+  async function worker(){
+    while(i<keys.length){
+      const k=keys[i++], f=DB.follows[k];
+      try{const d=await jget(`/details?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
+        if(d.chapters.length){
+          f.latestNum=d.chapters[d.chapters.length-1].number;
+          const base=f.lastChapterId, idx=base?d.chapters.findIndex(c=>c.id===base):-1;
+          const unread=idx>=0?(d.chapters.length-1-idx):(base?d.chapters.length:0);
+          f.unread=unread; if(unread>0)newCount++;
+        }
+      }catch(e){}
+    }
+  }
+  // controllo in parallelo (fino a 6 sorgenti insieme) -> molto più veloce
+  await Promise.all(Array.from({length:Math.min(LIMIT,keys.length)},worker));
+  saveDB();
+  const tot=Object.values(DB.follows).reduce((a,f)=>a+(f.unread>0?1:0),0);
+  setBadge(tot);
+  if(document.querySelector(".tab.active")&&document.querySelector(".tab.active").dataset.tab==="library")renderLibrary();
+  if(notify&&newCount&&SET.notify&&window.Notification&&Notification.permission==="granted"){
+    new Notification("MakReader",{body:`${newCount} manga con nuovi capitoli`});
+  }
+  return tot;
+}
+async function checkUpdatesManual(){
+  const ub=$("#updBtn");if(ub){ub.disabled=true;ub.textContent="🔄 Controllo…";}
+  await autoCheck(false);
+  renderLibrary();
+  toast("Aggiornamenti controllati");
+}
+let autoTimer;
+function scheduleAuto(){if(autoTimer)clearInterval(autoTimer);const h=SET.autoHours||6;if(h>0)autoTimer=setInterval(()=>autoCheck(true),h*3600*1000);}
+
+// ---------- import MyAnimeList ----------
+let importCancel=false;
+$("#malFile").addEventListener("change",async e=>{
+  const file=e.target.files[0];e.target.value="";if(!file)return;
+  toast("Leggo il file…");
+  let entries;
+  try{
+    const buf=await file.arrayBuffer();
+    const r=await fetch("/import/mal",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:buf});
+    const d=await r.json();if(d.error)throw new Error(d.error);entries=d.entries;
+  }catch(err){toast("Import fallito: "+err.message);return;}
+  if(!entries.length){toast("Nessun manga trovato nel file.");return;}
+  openImportModal(entries);
+});
+$("#backupFile").addEventListener("change",async e=>{
+  const f=e.target.files[0];e.target.value="";if(!f)return;
+  if(!confirm("Ripristinare la libreria da questo file? Sostituirà i dati attuali."))return;
+  try{const d=JSON.parse(await f.text());if(!d||!d.follows)throw new Error("file non valido");
+    DB=Object.assign(DB,d);await saveDB();libSelect=false;selSet.clear();renderLibrary();toast("Libreria ripristinata");
+  }catch(err){toast("Ripristino fallito: "+err.message);}
+});
+function openImportModal(entries){
+  const counts={};entries.forEach(x=>{const s=x.status||"Senza stato";counts[s]=(counts[s]||0)+1;});
+  const order=["Reading","Plan to Read","Completed","On-Hold","Dropped"];
+  const statuses=Object.keys(counts).sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
+  const en=enabledSources();
+  $("#importBox").innerHTML=`
+    <h2>Importa da MyAnimeList</h2>
+    <p class="sub">${entries.length} manga nel file. Scegli quali stati importare e da quale sorgente cercarli.</p>
+    <div class="fld">Stati da importare</div>
+    ${statuses.map(s=>`<label class="ck"><input type="checkbox" data-st="${esc(s)}" ${s==="Reading"||s==="Plan to Read"?"checked":""}><span>${esc(s)}</span><span class="ct">${counts[s]}</span></label>`).join("")}
+    <div class="fld">Cerca i titoli su</div>
+    <select id="impSrc">${en.map(id=>`<option value="${id}" ${id==="weebcentral"?"selected":""}>${esc(metaOf(id).name)}</option>`).join("")}</select>
+    <p class="sub" style="margin-top:10px">Per ogni titolo prendo la prima corrispondenza. I non trovati te li elenco alla fine.</p>
+    <div id="impArea"></div>
+    <div class="row"><button class="btn sec" id="impClose">Annulla</button><button class="btn" id="impGo">Importa</button></div>`;
+  $("#importModal").classList.remove("hidden");
+  $("#impClose").onclick=()=>{importCancel=true;$("#importModal").classList.add("hidden");};
+  $("#impGo").onclick=()=>runImport(entries);
+}
+let impProposals=[],impSrc=null;
+async function runImport(entries){
+  const sel=new Set([...document.querySelectorAll("[data-st]:checked")].map(c=>c.dataset.st));
+  impSrc=$("#impSrc").value;
+  const list=entries.filter(x=>sel.has(x.status||"Senza stato"));
+  if(!list.length){toast("Seleziona almeno uno stato.");return;}
+  importCancel=false;
+  $("#impGo").disabled=true;$("#impClose").textContent="Chiudi";
+  const area=$("#impArea");
+  impProposals=[];const notfound=[];
+  area.innerHTML=`<div class="impbar"><i id="impFill"></i></div><div class="impprog" id="impTxt"></div>`;
+  for(let i=0;i<list.length;i++){
+    if(importCancel)break;
+    const it=list[i];
+    $("#impFill").style.width=Math.round((i/list.length)*100)+"%";
+    $("#impTxt").textContent=`Cerco (${i+1}/${list.length}): ${it.title}`;
+    try{
+      const d=await jget(`/search?source=${encodeURIComponent(impSrc)}&q=${encodeURIComponent(it.title)}`);
+      const hit=d.results&&d.results[0];
+      if(hit)impProposals.push({orig:it.title,status:it.status,read:it.read,malId:it.malId,hit});else notfound.push(it.title);
+    }catch(e){notfound.push(it.title+" (errore)");}
+    await new Promise(r=>setTimeout(r,200));
+  }
+  $("#impFill").style.width="100%";
+  reviewImport(notfound);
+}
+function reviewImport(notfound){
+  const box=$("#importBox");
+  box.innerHTML=`<h2>Rivedi i risultati</h2>
+    <p class="sub">${impProposals.length} corrispondenze trovate su ${esc(metaOf(impSrc).name)}. Deseleziona quelle sbagliate, poi conferma.</p>
+    <div style="display:flex;gap:8px;margin-bottom:8px"><button class="btn sec" id="impAll" style="padding:6px 12px">Tutti</button><button class="btn sec" id="impNone" style="padding:6px 12px">Nessuno</button></div>
+    <div style="max-height:46vh;overflow:auto">${impProposals.map((p,i)=>{
+      const k=key(impSrc,p.hit.id),dup=!!DB.follows[k];
+      return `<label class="ck"><input type="checkbox" data-pi="${i}" ${dup?'':'checked'} ${dup?'disabled':''}>
+        ${p.hit.cover?`<img src="${img(p.hit.cover,srcRef(impSrc))}" style="width:30px;height:42px;object-fit:cover;border-radius:4px" onerror="this.style.visibility='hidden'">`:''}
+        <span style="flex:1"><b>${esc(p.hit.title||p.orig)}</b><br><span style="color:var(--muted);font-size:12px">da: ${esc(p.orig)}${dup?' · già in libreria':''}</span></span></label>`;
+    }).join("")||'<div class="empty">Nessuna corrispondenza.</div>'}</div>
+    ${notfound.length?`<div class="fld">Non trovati (${notfound.length}) — cercali a mano:</div><div style="font-size:12px;color:var(--muted);max-height:120px;overflow:auto">${notfound.map(esc).join("<br>")}</div>`:''}
+    <div class="row"><button class="btn sec" id="impClose2">Annulla</button><button class="btn" id="impConfirm">Aggiungi selezionati</button></div>`;
+  $("#impAll").onclick=()=>box.querySelectorAll("[data-pi]:not(:disabled)").forEach(c=>c.checked=true);
+  $("#impNone").onclick=()=>box.querySelectorAll("[data-pi]").forEach(c=>c.checked=false);
+  $("#impClose2").onclick=()=>$("#importModal").classList.add("hidden");
+  $("#impConfirm").onclick=async()=>{
+    let added=0;
+    box.querySelectorAll("[data-pi]:checked").forEach(c=>{const p=impProposals[+c.dataset.pi];const k=key(impSrc,p.hit.id);if(!DB.follows[k]){DB.follows[k]={source:impSrc,id:p.hit.id,title:p.hit.title||p.orig,cover:p.hit.cover||"",category:p.status||"",malRead:parseInt(p.read||"0")||0,malId:p.malId||"",lastChapterId:null};added++;}});
+    await saveDB();$("#importModal").classList.add("hidden");toast(`${added} manga aggiunti alla libreria`);renderLibrary();
+  };
+}
+
+// ---------- init ----------
+(async function(){
+  try{DB=await jget("/data");}catch(e){}
+  try{const s=await jget("/sources");META=s.meta;if(s.config&&s.config.order){DB.sources=s.config;}}catch(e){}
+  if(!DB.sources||!DB.sources.order){DB.sources={order:META.map(m=>m.id),enabled:Object.fromEntries(META.map(m=>[m.id,true]))};}
+  if(DB.settings)SET=Object.assign(SET,DB.settings);
+  await loadDownloads();
+  fillSourceSelect();renderLibrary();
+  // controllo non letti in background (non blocca l'avvio)
+  setTimeout(()=>{if(Object.keys(DB.follows).length)autoCheck(false);},1500);
+  scheduleAuto();
+})();
+</script>
+</body>
+</html>
