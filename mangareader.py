@@ -57,6 +57,12 @@ def parse_mal(raw):
     """Legge un export MyAnimeList (XML o XML gzippato) e restituisce le voci manga."""
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
+    if len(raw) > 30 * 1024 * 1024:
+        raise ValueError("File troppo grande.")
+    # sicurezza: rifiuta XML con DOCTYPE/ENTITY (vettore della 'XML bomb')
+    head = raw[:8192].lower()
+    if b"<!doctype" in head or b"<!entity" in head:
+        raise ValueError("File XML non ammesso (contiene DOCTYPE/ENTITY).")
     root = ET.fromstring(raw)
     entries = []
     for m in root.findall("manga"):
