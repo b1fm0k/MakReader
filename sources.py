@@ -12,10 +12,12 @@ Le immagini vengono servite dal proxy del server (con Referer corretto).
 
 import re
 import ssl
+import time
 import json
 import html as _html
 import urllib.request
 import urllib.parse
+import urllib.error
 
 # ---- SSL robusto (risolve il classico problema certificati di Python su macOS) ----
 try:
@@ -23,12 +25,19 @@ try:
 except Exception:
     _CTX = None
 _CTX_INSECURE = ssl._create_unverified_context()
+_WORKING_CTX = None   # ricorda il contesto SSL che ha funzionato (evita richieste doppie)
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/122.0 Safari/537.36")
 
 
+def _is_ssl(e):
+    reason = getattr(e, "reason", None)
+    return isinstance(reason, ssl.SSLError) or "SSL" in str(reason) or "CERTIFICATE" in str(e).upper()
+
+
 def http_get(url, referer=None, cookie=None, timeout=25, binary=False):
+    global _WORKING_CTX
     headers = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9",
                "Accept": "text/html,application/xhtml+xml,application/json,*/*"}
     if referer:
@@ -36,19 +45,36 @@ def http_get(url, referer=None, cookie=None, timeout=25, binary=False):
     if cookie:
         headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
+    contexts = []
+    if _WORKING_CTX is not None:
+        contexts.append(_WORKING_CTX)
+    for c in (_CTX, _CTX_INSECURE):
+        if c is not None and c not in contexts:
+            contexts.append(c)
     last = None
-    for ctx in (_CTX, _CTX_INSECURE):
-        if ctx is None:
-            continue
-        try:
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-                data = r.read()
-                return data if binary else data.decode("utf-8", "replace")
-        except ssl.SSLError as e:
-            last = e
-            continue
-        except Exception as e:
-            raise
+    for ctx in contexts:
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                    data = r.read()
+                    _WORKING_CTX = ctx
+                    return data if binary else data.decode("utf-8", "replace")
+            except ssl.SSLError as e:
+                last = e
+                break  # prova il prossimo contesto
+            except urllib.error.HTTPError as e:
+                if e.code in (429, 500, 502, 503) and attempt == 1:
+                    time.sleep(1.2)  # blocco temporaneo: riprova una volta
+                    continue
+                raise
+            except urllib.error.URLError as e:
+                if _is_ssl(e):
+                    last = e
+                    break  # prova il prossimo contesto (non verificato)
+                if attempt == 1:
+                    time.sleep(0.6)
+                    continue
+                raise
     raise last if last else RuntimeError("richiesta fallita")
 
 
@@ -369,10 +395,12 @@ class MangaDex(Source):
     base = "https://api.mangadex.org"
     note = "API ufficiale, legale. Multilingua."
     lang = "en"
+    chlabel = "Chapter"
 
     def search(self, query):
         url = (self.base + "/manga?title=" + urllib.parse.quote(query) +
                "&limit=24&includes[]=cover_art&order[relevance]=desc"
+               "&availableTranslatedLanguage[]=" + self.lang +
                "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica")
         data = json.loads(http_get(url))
         out = []
@@ -394,7 +422,8 @@ class MangaDex(Source):
         a = d["attributes"]
         t = a["title"]
         title = t.get("en") or (list(t.values())[0] if t else "?")
-        desc = (a.get("description") or {}).get("en", "")
+        descs = a.get("description") or {}
+        desc = descs.get(self.lang) or descs.get("en", "")
         cover = ""
         authors = []
         for r in d.get("relationships", []):
@@ -410,12 +439,12 @@ class MangaDex(Source):
         chapters, off = [], 0
         while True:
             feed = json.loads(http_get(
-                "%s/manga/%s/feed?translatedLanguage[]=en&order[chapter]=asc&limit=100&offset=%d"
+                "%s/manga/%s/feed?translatedLanguage[]=%s&order[chapter]=asc&limit=100&offset=%d"
                 "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica"
-                % (self.base, manga_id, off)))
+                % (self.base, manga_id, self.lang, off)))
             for c in feed.get("data", []):
                 ca = c["attributes"]
-                chapters.append({"id": c["id"], "name": "Chapter " + (ca.get("chapter") or "?"),
+                chapters.append({"id": c["id"], "name": self.chlabel + " " + (ca.get("chapter") or "?"),
                                  "number": ca.get("chapter") or ""})
             off += 100
             if off >= feed.get("total", 0) or not feed.get("data"):
@@ -432,9 +461,9 @@ class MangaDex(Source):
 
     def latest(self, manga_id):
         d = json.loads(http_get(
-            "%s/manga/%s/feed?order[chapter]=desc&limit=1&translatedLanguage[]=en"
+            "%s/manga/%s/feed?order[chapter]=desc&limit=1&translatedLanguage[]=%s"
             "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica"
-            % (self.base, manga_id)))
+            % (self.base, manga_id, self.lang)))
         arr = d.get("data") or []
         return arr[0]["attributes"].get("chapter", "") if arr else ""
 
@@ -445,8 +474,106 @@ class MangaDex(Source):
         return {"pages": pages, "referer": ""}
 
 
+class MangaDexIT(MangaDex):
+    id = "mangadex-it"
+    name = "MangaDex (Italiano)"
+    lang = "it"
+    chlabel = "Cap."
+    note = "API ufficiale MangaDex, capitoli in italiano (dove disponibili)."
+
+
+# ============================================================
+#  MangaWorld (sito italiano)
+# ============================================================
+class MangaWorld(Source):
+    id = "mangaworld"
+    name = "MangaWorld"
+    base = "https://www.mangaworld.mx"
+    lang = "it"
+    note = "Sito italiano: scan in italiano. Scraping (può cambiare)."
+
+    def search(self, query):
+        html = http_get(self.base + "/archive?keyword=" + urllib.parse.quote(query),
+                        referer=self.base + "/")
+        out, seen = [], set()
+        for blk in re.split(r'class="entry', html):
+            mu = re.search(r'href="((?:https?://[^"]*)?/manga/\d+/[^"#?]+?)"', blk)
+            if not mu:
+                continue
+            url = _abs(mu.group(1), self.base)
+            if "/read/" in url or url in seen:
+                continue
+            seen.add(url)
+            tt = (re.search(r'manga-title[^>]*>\s*([^<]+?)\s*<', blk) or
+                  re.search(r'href="[^"]*/manga/\d+/[^"]*"[^>]*>\s*([^<]+?)\s*<', blk))
+            title = _clean(tt.group(1)) if tt else url.rstrip("/").rsplit("/", 1)[-1].replace("-", " ")
+            cm = re.search(r'<img[^>]+(?:data-src|src)="([^"]+)"', blk)
+            cover = _abs(cm.group(1), self.base) if cm else ""
+            out.append({"id": url, "title": title, "cover": cover, "status": ""})
+        return out
+
+    def _chapters(self, page):
+        chapters, seen = [], set()
+        for m in re.finditer(r'href="((?:https?://[^"]*)?/manga/\d+/[^"]+?/read/[^"#?]+?)"[^>]*>(.*?)</a>',
+                             page, re.S):
+            curl = _abs(m.group(1), self.base)
+            if curl in seen:
+                continue
+            seen.add(curl)
+            txt = _clean(re.sub(r"<[^>]+>", " ", m.group(2)))
+            nm = re.search(r"[Cc]apitolo\s+([\d.]+)", txt) or re.search(r"([\d.]+)", txt)
+            chapters.append({"id": curl, "name": txt or "Capitolo",
+                             "number": nm.group(1) if nm else ""})
+
+        def _num(c):
+            try:
+                return (0, float(c["number"]))
+            except (ValueError, TypeError):
+                return (1, 0.0)
+        chapters.sort(key=_num)
+        return chapters
+
+    def details(self, manga_id):
+        page = http_get(manga_id, referer=self.base + "/")
+        h = re.search(r'<h1[^>]*>\s*([^<]+?)\s*</h1>', page)
+        title = _clean(h.group(1)) if h else ""
+        if not title:
+            og = re.search(r'property="og:title"[^>]+content="([^"]+)"', page)
+            title = _clean(og.group(1)) if og else ""
+        cm = re.search(r'property="og:image"[^>]+content="([^"]+)"', page)
+        cover = cm.group(1) if cm else ""
+        dm = re.search(r'id="noidungm"[^>]*>(.*?)</', page, re.S) or \
+            re.search(r'class="[^"]*description[^"]*"[^>]*>(.*?)</div>', page, re.S)
+        desc = _clean(re.sub(r"<[^>]+>", " ", dm.group(1))) if dm else ""
+        if not desc:
+            md = re.search(r'name="description"[^>]+content="([^"]*)"', page)
+            desc = _clean(md.group(1)) if md else ""
+        author = ", ".join(dict.fromkeys(
+            _clean(a) for a in re.findall(r'/archive\?author=[^"]*"[^>]*>([^<]+)<', page)))
+        genres = [_clean(g) for g in re.findall(r'/archive\?genre=[^"]*"[^>]*>([^<]+)<', page)][:12]
+        stm = re.search(r'/archive\?status=[^"]*"[^>]*>([^<]+)<', page)
+        status = _clean(stm.group(1)) if stm else ""
+        return {"title": title, "cover": cover, "description": desc,
+                "chapters": self._chapters(page), "author": author, "status": status,
+                "year": "", "genres": genres, "altTitles": []}
+
+    def latest(self, manga_id):
+        page = http_get(manga_id, referer=self.base + "/")
+        ch = self._chapters(page)
+        return ch[-1]["number"] if ch else ""
+
+    def pages(self, chapter_id):
+        sep = "&" if "?" in chapter_id else "?"
+        page = http_get(chapter_id + sep + "style=list", referer=self.base + "/")
+        pages = re.findall(r'<img[^>]+class="[^"]*page-image[^"]*"[^>]+(?:data-src|src)="([^"]+)"', page)
+        if not pages:
+            pages = re.findall(r'<img[^>]+(?:data-src|src)="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"', page)
+            pages = [p for p in pages if "/read/" in p or "cdn" in p or "/uploads" in p or "/manga" in p]
+        return {"pages": [_abs(p, self.base) for p in pages], "referer": self.base + "/"}
+
+
 # ---- registry ----
-_ALL = [WeebCentral(), MangaFox(), MangaHere(), MangaDex()]
+_ALL = [WeebCentral(), MangaFox(), MangaHere(), MangaDex(), MangaDexIT(), MangaWorld()]
 REGISTRY = {s.id: s for s in _ALL}
 DEFAULT_ORDER = [s.id for s in _ALL]
 

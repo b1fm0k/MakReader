@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MakReader</title>
+<link rel="icon" type="image/png" href="/icon">
+<link rel="apple-touch-icon" href="/icon">
 <style>
   :root{--bg:#0e1014;--panel:#171a21;--panel2:#1f232c;--border:#2a2f3a;--text:#e7e9ee;
     --muted:#9aa3b2;--accent:#7c5cff;--accent2:#5a8dee;--good:#3ec27a;--warn:#e0a13a;--reader-bg:#0a0a0a;}
@@ -12,6 +14,7 @@
   button{font-family:inherit;cursor:pointer}.hidden{display:none !important}
   header{position:sticky;top:0;z-index:50;background:rgba(14,16,20,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
   .bar{display:flex;align-items:center;gap:10px;padding:12px 16px;max-width:1100px;margin:0 auto;flex-wrap:wrap}
+  .logoimg{width:30px;height:30px;border-radius:7px;flex:none}
   .logo{font-weight:800;font-size:20px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
   .tabs{display:flex;gap:4px;flex:1}
   .tab{background:none;border:none;color:var(--muted);padding:8px 13px;border-radius:9px;font-size:14px;font-weight:600}
@@ -139,6 +142,7 @@
 <body>
 <header>
   <div class="bar">
+    <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
@@ -208,7 +212,8 @@ const srcRef=src=>(metaOf(src).base||'')+'/';   // Referer corretto per le immag
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600);}
 function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 async function jget(u){const r=await fetch(u);const d=await r.json();if(d&&d.error)throw new Error(d.error);return d;}
-async function saveDB(){await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
+let dataLoaded=false;
+async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
 
 // ---------- tabs ----------
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
@@ -928,7 +933,7 @@ function reviewImport(notfound){
 
 // ---------- init ----------
 (async function(){
-  try{DB=await jget("/data");}catch(e){}
+  try{DB=await jget("/data");dataLoaded=true;}catch(e){alert("MakReader: impossibile leggere la libreria dal server. Per sicurezza non salverò nulla finché non ricarichi la pagina.");}
   try{const s=await jget("/sources");META=s.meta;if(s.config&&s.config.order){DB.sources=s.config;}}catch(e){}
   if(!DB.sources||!DB.sources.order){DB.sources={order:META.map(m=>m.id),enabled:Object.fromEntries(META.map(m=>[m.id,true]))};}
   if(DB.settings)SET=Object.assign(SET,DB.settings);

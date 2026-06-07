@@ -27,7 +27,7 @@ if getattr(sys, "frozen", False):
     _BUNDLE = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     HERE = os.path.join(os.path.expanduser("~"), "MakReader-dati")
     os.makedirs(HERE, exist_ok=True)
-    for _fn in ("index.html", "sources.py", "downloads.py", "version.json"):
+    for _fn in ("index.html", "sources.py", "downloads.py", "version.json", "makreader.png"):
         _dst, _src = os.path.join(HERE, _fn), os.path.join(_BUNDLE, _fn)
         if not os.path.exists(_dst) and os.path.exists(_src):
             try:
@@ -116,29 +116,63 @@ def local_version():
         return "0"
 
 
+_SAVE_LOCK = threading.Lock()
+
+
+def _read_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        raw = f.read()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # file troncato/duplicato: recupera il primo oggetto JSON valido
+        obj, _ = json.JSONDecoder().raw_decode(raw)
+        return obj
+
+
 def load_data():
+    d = None
     if os.path.exists(DATA_FILE):
         try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                d = json.load(f)
+            d = _read_json(DATA_FILE)
         except Exception:
-            d = {}
-    else:
+            # prova il backup automatico
+            if os.path.exists(DATA_FILE + ".bak"):
+                try:
+                    d = _read_json(DATA_FILE + ".bak")
+                except Exception:
+                    d = None
+    if not isinstance(d, dict):
         d = {}
     d.setdefault("follows", {})
     d.setdefault("progress", {})
     d.setdefault("history", [])
     d.setdefault("sources", {"order": sources.DEFAULT_ORDER,
                              "enabled": {s: True for s in sources.DEFAULT_ORDER}})
+    # integra eventuali sorgenti nuove non ancora presenti nella config salvata
+    order = d["sources"].setdefault("order", [])
+    enabled = d["sources"].setdefault("enabled", {})
+    for sid in sources.DEFAULT_ORDER:
+        if sid not in order:
+            order.append(sid)
+        enabled.setdefault(sid, True)
     d.setdefault("settings", {"dir": "ltr", "width": "M", "autoHours": 6, "notify": False})
     return d
 
 
 def save_data(data):
-    tmp = DATA_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, DATA_FILE)
+    # un solo salvataggio per volta (evita scritture concorrenti che corrompono il file)
+    with _SAVE_LOCK:
+        tmp = "%s.%d.tmp" % (DATA_FILE, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # backup della versione precedente prima di sostituire
+        if os.path.exists(DATA_FILE):
+            try:
+                shutil.copy(DATA_FILE, DATA_FILE + ".bak")
+            except Exception:
+                pass
+        os.replace(tmp, DATA_FILE)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -177,6 +211,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/data":
             self._json(load_data())
+            return
+
+        if path == "/icon":
+            ip = os.path.join(HERE, "makreader.png")
+            if os.path.exists(ip):
+                with open(ip, "rb") as f:
+                    self._send(200, f.read(), "image/png", extra={"Cache-Control": "max-age=86400"})
+            else:
+                self._send(404, "no icon", "text/plain")
             return
 
         if path == "/sources":
