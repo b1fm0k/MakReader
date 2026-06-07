@@ -8,8 +8,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install pyinstaller
-      - run: pyinstaller --noconfirm --name MakReader --windowed --add-data "index.html:." --add-data "sources.py:." --add-data "downloads.py:." --add-data "version.json:." --hidden-import ssl --hidden-import re --hidden-import html --hidden-import queue --hidden-import hashlib --hidden-import urllib.request --hidden-import urllib.error mangareader.py
+      - run: pip install pyinstaller pillow
+      - run: pyinstaller --noconfirm --name MakReader --windowed --icon makreader.png --add-data "index.html:." --add-data "sources.py:." --add-data "downloads.py:." --add-data "version.json:." --add-data "makreader.png:." --hidden-import ssl --hidden-import re --hidden-import html --hidden-import queue --hidden-import hashlib --hidden-import urllib.request --hidden-import urllib.error mangareader.py
       - run: ditto -c -k --keepParent dist/MakReader.app MakReader-Mac.zip
       - uses: actions/upload-artifact@v4
         with:
