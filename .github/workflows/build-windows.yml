@@ -1,0 +1,37 @@
+name: Crea programma Windows
+
+   on:
+     workflow_dispatch:
+     push:
+       tags: ['v*']
+
+   jobs:
+     build:
+       runs-on: windows-latest
+       steps:
+         - uses: actions/checkout@v4
+
+         - uses: actions/setup-python@v5
+           with:
+             python-version: '3.12'
+
+         - name: Installa PyInstaller
+           run: pip install pyinstaller
+
+         - name: Costruisci MakReader
+           run: >
+             pyinstaller --noconfirm --name MakReader --onedir --windowed
+             --add-data "index.html;."
+             --add-data "sources.py;."
+             --add-data "downloads.py;."
+             --add-data "version.json;."
+             mangareader.py
+
+         - name: Comprimi in zip
+           run: Compress-Archive -Path dist/MakReader/* -DestinationPath MakReader-Windows.zip
+
+         - name: Carica il risultato
+           uses: actions/upload-artifact@v4
+           with:
+             name: MakReader-Windows
+             path: MakReader-Windows.zip
