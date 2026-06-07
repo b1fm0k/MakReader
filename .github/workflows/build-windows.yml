@@ -1,5 +1,10 @@
 name: Crea programma Windows
-on: [workflow_dispatch]
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -15,3 +20,8 @@ jobs:
         with:
           name: MakReader-Windows
           path: MakReader-Windows.zip
+      - name: Allega alla Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MakReader-Windows.zip
