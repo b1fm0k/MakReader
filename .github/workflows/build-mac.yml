@@ -1,0 +1,17 @@
+name: Crea programma Mac
+on: [workflow_dispatch]
+jobs:
+  build:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyinstaller
+      - run: pyinstaller --noconfirm --name MakReader --windowed --add-data "index.html:." --add-data "sources.py:." --add-data "downloads.py:." --add-data "version.json:." --hidden-import ssl --hidden-import re --hidden-import html --hidden-import queue --hidden-import hashlib --hidden-import urllib.request --hidden-import urllib.error mangareader.py
+      - run: ditto -c -k --keepParent dist/MakReader.app MakReader-Mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MakReader-Mac
+          path: MakReader-Mac.zip
