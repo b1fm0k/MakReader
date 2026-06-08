@@ -1,4 +1,4 @@
 {
-  "version": "1.0.1",
-  "notes": "Nuovi siti in italiano: MangaWorld e MangaDex Italiano.\nNuova icona dell'app.\nRisolti errori di connessione e resa più sicura la libreria.\nNota: MangaDex probabilmente continua a non funzionare (puoi anche disattivarlo in Sorgenti)."
+  "version": "1.0.2",
+  "notes": "Ora puoi consigliare manga agli amici: pulsante Consiglia e nuova sezione Suggerimenti.\nScheda manga più ordinata e pulsante per chiudere l'app in alto a destra.\nPiccole correzioni di sicurezza e stabilità."
 }

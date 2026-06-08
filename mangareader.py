@@ -163,6 +163,7 @@ def load_data():
             order.append(sid)
         enabled.setdefault(sid, True)
     d.setdefault("settings", {"dir": "ltr", "width": "M", "autoHours": 6, "notify": False})
+    d.setdefault("suggestions", [])
     return d
 
 
@@ -389,6 +390,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"error": str(e)}, 400)
+            return
+        if p.path == "/quit":
+            self._json({"ok": True})
+            threading.Timer(0.4, lambda: os._exit(0)).start()
             return
         if p.path == "/update/apply":
             if not UPDATE_REPO:

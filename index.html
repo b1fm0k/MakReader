@@ -65,6 +65,9 @@
   .hero{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--border)}
   .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center top;filter:blur(30px) brightness(.32);transform:scale(1.2)}
   .hero .detail-head{position:relative;padding:22px}
+  .heroShare{position:absolute;top:12px;right:12px;z-index:5;background:rgba(0,0,0,.55);border:1px solid var(--border);color:#fff;width:38px;height:38px;border-radius:10px;font-size:17px;cursor:pointer}
+  .heroShare:hover{background:var(--accent);border-color:var(--accent)}
+  .libstate{background:var(--good);color:#06231a;border:none;padding:10px 14px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer}
   .detail-head{display:flex;gap:20px;flex-wrap:wrap}
   .detail-head .cover{width:210px;aspect-ratio:11/16;object-fit:cover;border-radius:12px;border:1px solid var(--border);background:var(--panel2);box-shadow:0 8px 30px rgba(0,0,0,.5)}
   .alttitles{color:var(--muted);font-size:12.5px;margin:0 0 8px;line-height:1.5;font-style:italic}
@@ -111,6 +114,7 @@
   #reader.light .rtop{background:rgba(233,230,223,.9);border-color:#cbc8c0;color:#222}
   .rtop .rtitle{flex:1;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ricon{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:9px;font-size:16px}
+  #quitTop{flex:none}#quitTop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
   #reader.light .ricon{background:#fff;border-color:#cbc8c0;color:#222}
   .pages{display:flex;flex-direction:column;align-items:center;padding-bottom:80px}
   .pages img{max-width:760px;width:100%;display:block}
@@ -147,18 +151,21 @@
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
+      <button class="tab" data-tab="suggestions">Suggerimenti <span class="badge hidden" id="sugBadge">0</span></button>
       <button class="tab" data-tab="sources">Sorgenti</button>
     </div>
     <div class="search">
       <select id="srcSel" title="Sorgente di ricerca"></select>
       <input id="searchInput" type="search" placeholder="Cerca manga…" autocomplete="off">
     </div>
+    <button class="ricon" id="quitTop" title="Chiudi MakReader">⏻</button>
   </div>
 </header>
 
 <main>
   <div id="view-library"></div>
   <div id="view-search" class="hidden"></div>
+  <div id="view-suggestions" class="hidden"></div>
   <div id="view-sources" class="hidden"></div>
   <div id="view-detail" class="hidden"></div>
 </main>
@@ -184,11 +191,13 @@
 <div class="toast" id="toast"></div>
 <input type="file" id="malFile" accept=".xml,.gz,.xml.gz,application/gzip,text/xml" class="hidden">
 <input type="file" id="backupFile" accept="application/json,.json" class="hidden">
+<input type="file" id="sugFile" accept=".mkr,text/plain" class="hidden">
 <div id="importModal" class="modal hidden"><div class="box" id="importBox"></div></div>
 
 <script>
 const $=s=>document.querySelector(s);
-let DB={follows:{},progress:{},history:[],sources:{order:[],enabled:{}},settings:{}};
+let DB={follows:{},progress:{},history:[],sources:{order:[],enabled:{}},settings:{},suggestions:[]};
+let sugFilter="__all__";
 let SET={dir:"ltr",width:"M",autoHours:6,notify:false};
 let META=[];               // [{id,name,note,lang,base}]
 let curSearchSource=localStorage.getItem("searchSource")||"__all__";
@@ -219,8 +228,9 @@ async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST"
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 function showTab(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
-  ["library","search","sources","detail"].forEach(v=>$("#view-"+v).classList.toggle("hidden",v!==name));
+  ["library","search","suggestions","sources","detail"].forEach(v=>$("#view-"+v).classList.toggle("hidden",v!==name));
   if(name==="library")renderLibrary();
+  if(name==="suggestions")renderSuggestions();
   if(name==="sources")renderSources();
 }
 
@@ -246,7 +256,10 @@ function renderSources(){
       </div>`;
     }).join("")+
     '<p style="color:var(--muted);font-size:13px;line-height:1.6;margin-top:18px">Note: <b>MangaFox</b> e <b>MangaHere</b> condividono lo stesso motore; ricerca e capitoli sono solidi, la lettura delle pagine è sperimentale. <b>MangaFire</b> non è incluso perché protetto da Cloudflare (richiederebbe un browser headless).</p>'+
-    `<h3 class="sec" style="margin-top:26px">Aggiornamenti automatici</h3>
+    `<h3 class="sec" style="margin-top:26px">Il tuo nome (per i suggerimenti)</h3>
+     <input id="setName" placeholder="Es. Mario" value="${esc(myName())}" style="max-width:260px">
+     <p class="sub" style="margin-top:6px">Comparirà come "Da: ..." sui consigli che invii agli amici.</p>
+     <h3 class="sec" style="margin-top:26px">Aggiornamenti automatici</h3>
      <label class="ck" style="max-width:520px"><input type="checkbox" id="setNotify" ${SET.notify?'checked':''}><span>Notifiche desktop per i nuovi capitoli</span></label>
      <div class="fld">Controlla automaticamente ogni</div>
      <select id="setHours" style="max-width:220px">
@@ -263,11 +276,12 @@ function renderSources(){
     SET.notify=e.target.checked;DB.settings=SET;saveDB();
   };
   $("#setHours").onchange=e=>{SET.autoHours=parseInt(e.target.value);DB.settings=SET;saveDB();scheduleAuto();};
+  const sn=$("#setName");if(sn)sn.onchange=e=>{SET.name=e.target.value.trim();DB.settings=SET;saveDB();toast("Nome salvato");};
   $("#checkUpd").onclick=async()=>{
     const m=$("#updMsg");m.textContent="Controllo…";
     try{const d=await jget("/update/check");
       if(!d.configured){m.textContent="Aggiornamenti non ancora configurati (vedi la guida GitHub).";return;}
-      if(d.update){m.innerHTML='Nuova versione '+esc(d.latest)+' disponibile. <button class="btn" id="doUpd" style="padding:5px 11px">Aggiorna ora</button>';$("#doUpd").onclick=applyUpd;}
+      if(d.update){m.innerHTML='Nuova versione <b>'+esc(d.latest)+'</b> disponibile.'+(d.notes?'<div class="sub" style="margin:6px 0">Novità: '+esc(d.notes).replace(/\n/g,"<br>")+'</div>':'')+'<button class="btn" id="doUpd" style="padding:5px 11px;margin-top:6px">Aggiorna ora</button>';$("#doUpd").onclick=applyUpd;}
       else m.textContent="Sei aggiornato (versione "+esc(d.current)+").";
     }catch(e){m.textContent="Errore nel controllo: "+esc(e.message||String(e));}
   };
@@ -383,7 +397,6 @@ async function openDetail(src,id,known){
   const resumeBtn=resumeIdx>=0?('<button class="btn" id="resumeBtn">▶ Riprendi'+(prog.lastChapterNum?(' (Cap. '+esc(prog.lastChapterNum)+')'):'')+'</button>'):'';
   const crossBtn=enabledSources().filter(s=>s!==src).length?('<button class="btn sec" id="crossBtn">🔎 Altre sorgenti</button>'):'';
   const malUrl=(f&&f.malId)?('https://myanimelist.net/manga/'+encodeURIComponent(f.malId)):('https://myanimelist.net/manga.php?cat=manga&q='+encodeURIComponent(d.title||(known&&known.title)||""));
-  const catSelHtml=followed?('<select id="catSel" style="padding:9px 11px">'+["",...CATS].map(c=>'<option value="'+esc(c)+'" '+((f.category||"")===c?'selected':'')+'>'+(c?esc(c):'Senza stato')+'</option>').join("")+'</select>'):'';
   const metaBits=[d.status,d.year,d.author].filter(Boolean).map(esc).join(" · ");
   const genresHtml=(d.genres&&d.genres.length)?('<div class="tagrow">'+d.genres.map(g=>'<span class="tag">'+esc(g)+'</span>').join("")+'</div>'):'';
   const heroBg=cover?('<div class="bg" style="background-image:url(\''+img(cover,refHost)+'\')"></div>'):'';
@@ -392,6 +405,7 @@ async function openDetail(src,id,known){
   v.innerHTML=`
    <button class="btn sec" id="backBtn" style="margin-bottom:14px">← Indietro</button>
    <div class="hero">${heroBg}
+     <button class="heroShare" id="shareBtn" title="Consiglia a un amico">↗</button>
    <div class="detail-head">
      ${cover?`<img class="cover" src="${img(cover,refHost)}" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>'}
      <div class="detail-info">
@@ -401,13 +415,12 @@ async function openDetail(src,id,known){
        ${metaBits?`<div class="metaline">${metaBits}</div>`:''}
        ${genresHtml}
        <div class="actions">
-         <button class="btn ${followed?'on':''}" id="followBtn">${followed?'✓ Nella libreria':'+ Aggiungi alla libreria'}</button>
+         <span id="libCtrlWrap"></span>
          ${resumeBtn}
          <button class="btn sec" id="readFirst">Leggi dall'inizio</button>
          <button class="btn sec" id="dlAll">⬇ Scarica tutti</button>
          ${crossBtn}
          <button class="btn sec" id="malBtn">MAL ↗</button>
-         ${catSelHtml}
        </div>
      </div>
    </div>
@@ -456,13 +469,23 @@ async function openDetail(src,id,known){
   }
   paintChapters();
   {const vb=$("#chapViewBtn");if(vb)vb.onclick=()=>{chapView=chapView==="grid"?"rows":"grid";localStorage.setItem("chapView",chapView);paintChapters();};}
-  $("#followBtn").onclick=()=>toggleFollow(src,id,d,cover);
+  function renderLibCtrl(){
+    const kk=key(src,id),ff=DB.follows[kk],w=$("#libCtrlWrap");if(!w)return;
+    if(!ff){
+      w.innerHTML='<button class="btn" id="followBtn">+ Aggiungi alla libreria</button>';
+      $("#followBtn").onclick=async()=>{DB.follows[kk]={source:src,id,title:d.title||(known&&known.title)||"",cover:cover||"",category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null};await saveDB();toast("Aggiunto alla libreria ✓");renderLibCtrl();};
+    }else{
+      w.innerHTML='<select id="libState" class="libstate">'+["",...CATS].map(c=>'<option value="'+esc(c)+'" '+((ff.category||"")===c?'selected':'')+'>'+(c?('✓ '+esc(c)):'✓ Nella libreria')+'</option>').join('')+'<option value="__remove__">✕ Rimuovi dalla libreria</option></select>';
+      $("#libState").onchange=async e=>{const val=e.target.value;if(val==="__remove__"){delete DB.follows[kk];await saveDB();toast("Rimosso dalla libreria");renderLibCtrl();return;}DB.follows[kk].category=val;await saveDB();toast("Stato aggiornato");};
+    }
+  }
+  renderLibCtrl();
   $("#readFirst").onclick=()=>{if(d.chapters.length)openReader(src,d.chapters,0,k,d.title,cover,refHost);};
   if(resumeIdx>=0)$("#resumeBtn").onclick=()=>openReader(src,d.chapters,resumeIdx,k,d.title,cover,refHost,prog.lastPage||0);
   $("#dlAll").onclick=async()=>{if(!d.chapters.length)return;if(confirm(`Scaricare tutti i ${d.chapters.length} capitoli? Può richiedere tempo.`)){await downloadChapters(d.chapters.map(c=>({source:src,chapter_id:c.id,manga_key:k,title:d.title,chapter_name:c.name||('Cap. '+c.number)})));toast("Download in coda");}};
-  const cs=$("#catSel");if(cs)cs.onchange=()=>{DB.follows[k].category=cs.value;saveDB();toast("Stato aggiornato");};
-  const cb=$("#crossBtn");if(cb)cb.onclick=()=>crossSearch(d.title||(known&&known.title)||"",src,followed?k:null);
+  const cb=$("#crossBtn");if(cb)cb.onclick=()=>crossSearch(d.title||(known&&known.title)||"",src,!!DB.follows[k]?k:null);
   const mb=$("#malBtn");if(mb)mb.onclick=()=>window.open(malUrl,"_blank");
+  const shb=$("#shareBtn");if(shb)shb.onclick=()=>openShareModal([{source:src,id,title:d.title||(known&&known.title)||"",cover:cover}]);
   $("#backBtn").onclick=()=>showTab(detailBack||"library");
   const malBox=$("#malBox");
   if(malBox)malBox.addEventListener("toggle",()=>{if(malBox.open&&!malBox.dataset.loaded){malBox.dataset.loaded="1";loadMal(f&&f.malId,d.title||(known&&known.title)||"");}});
@@ -514,6 +537,90 @@ function migrateFollow(oldKey,newSrc,r){
   DB.follows[nk]={source:newSrc,id:r.id,title:r.title||old.title||"",cover:r.cover||old.cover||"",category:old.category||"",malRead:old.malRead||0,lastChapterId:null};
   saveDB();toast("Migrato su "+metaOf(newSrc).name);
 }
+
+// ---------- suggerimenti tra amici ----------
+function myName(){return (SET&&SET.name)||"";}
+function setSugBadge(){const b=$("#sugBadge");const n=(DB.suggestions||[]).length;if(n>0){b.textContent=n;b.classList.remove("hidden");}else b.classList.add("hidden");}
+function encodeShare(items){
+  const payload={t:"mkr-share",from:myName(),items:items.map(x=>({s:x.source,i:x.id,ti:x.title||"",c:x.cover||"",m:x.msg||""}))};
+  return "MKR1:"+btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+}
+function decodeShare(text){
+  text=(text||"").trim();const i=text.indexOf("MKR1:");
+  if(i<0)throw new Error("codice non riconosciuto");
+  let json;try{json=decodeURIComponent(escape(atob(text.slice(i+5).trim())));}catch(e){throw new Error("codice illeggibile");}
+  const p=JSON.parse(json);
+  if(p.t!=="mkr-share"||!Array.isArray(p.items))throw new Error("codice non valido");
+  return p;
+}
+function validItem(it){
+  if(!it||!it.s||!it.i||!META.find(m=>m.id===it.s))return false;
+  if(/^https?:\/\//i.test(it.i)){
+    try{if(new URL(it.i).host!==new URL(metaOf(it.s).base).host)return false;}catch(e){return false;}
+  }
+  return true;
+}
+function importShare(text){
+  let p;try{p=decodeShare(text);}catch(e){toast("Import fallito: "+e.message);return -1;}
+  let added=0;
+  p.items.forEach(it=>{
+    if(!validItem(it))return;
+    const s={source:it.s,id:it.i,title:it.ti||"",cover:it.c||"",msg:it.m||"",from:p.from||"",ts:Date.now()};
+    if(!DB.suggestions.find(x=>x.source===s.source&&x.id===s.id&&x.from===s.from)){DB.suggestions.push(s);added++;}
+  });
+  saveDB();setSugBadge();
+  return added;
+}
+function openShareModal(items){
+  const box=$("#importBox");$("#importModal").classList.remove("hidden");
+  const rows=items.map((x,i)=>'<div class="ck" style="display:block"><div style="font-weight:600;font-size:14px;margin-bottom:4px">'+esc(x.title||x.id)+' <span class="sub">('+esc(metaOf(x.source).name)+')</span></div><textarea data-msg="'+i+'" rows="2" placeholder="Perché lo consigli? (facoltativo)" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 9px;font-size:13px;font-family:inherit"></textarea></div>').join("");
+  box.innerHTML='<h2>Condividi'+(items.length>1?" ("+items.length+" manga)":"")+'</h2>'+
+    (myName()?'<p class="sub">Firmato come: <b>'+esc(myName())+'</b></p>':'<p class="sub" style="color:var(--warn)">Imposta il tuo nome in Sorgenti, così l\'amico sa da chi arriva.</p>')+
+    rows+'<div id="shareOut" style="margin-top:8px"></div>'+
+    '<div class="row"><button class="btn sec" id="shClose">Chiudi</button><button class="btn sec" id="shCopy">📋 Copia codice</button><button class="btn" id="shFile">💾 Salva file</button></div>';
+  const collect=()=>items.map((x,i)=>({source:x.source,id:x.id,title:x.title,cover:x.cover,msg:(box.querySelector('[data-msg="'+i+'"]').value||"").trim()}));
+  $("#shClose").onclick=()=>$("#importModal").classList.add("hidden");
+  $("#shCopy").onclick=async()=>{const code=encodeShare(collect());try{await navigator.clipboard.writeText(code);toast("Codice copiato negli appunti");}catch(e){$("#shareOut").innerHTML='<div class="sub" style="margin-bottom:4px">Copia questo testo:</div><textarea rows="4" readonly style="width:100%;font-family:monospace;font-size:11px;background:var(--panel);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:8px">'+esc(code)+'</textarea>';}};
+  $("#shFile").onclick=()=>{const code=encodeShare(collect());const blob=new Blob([code],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);const who=myName()?("-di-"+myName().replace(/[^A-Za-z0-9]+/g,"")):"";a.download="consigli"+who+".mkr";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);toast("File salvato");};
+}
+function openSugImport(){
+  const box=$("#importBox");$("#importModal").classList.remove("hidden");
+  box.innerHTML='<h2>Importa suggerimento</h2><p class="sub">Incolla il codice ricevuto, oppure apri il file <b>.mkr</b>.</p>'+
+    '<textarea id="sugPaste" rows="4" placeholder="MKR1:..." style="width:100%;font-family:monospace;font-size:11px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px"></textarea>'+
+    '<div class="row"><button class="btn sec" id="sugFileBtn">Apri file…</button><button class="btn sec" id="sugClose2">Chiudi</button><button class="btn" id="sugDo">Importa</button></div>';
+  $("#sugClose2").onclick=()=>$("#importModal").classList.add("hidden");
+  $("#sugFileBtn").onclick=()=>$("#sugFile").click();
+  $("#sugDo").onclick=()=>{const n=importShare($("#sugPaste").value);if(n>=0){$("#importModal").classList.add("hidden");toast(n+" suggerimenti importati");renderSuggestions();}};
+}
+$("#sugFile").addEventListener("change",async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;const n=importShare(await f.text());if(n>=0){$("#importModal").classList.add("hidden");toast(n+" suggerimenti importati");renderSuggestions();}});
+function renderSuggestions(){
+  const v=$("#view-suggestions");
+  let html='<div class="toolbar"><button class="btn sec" id="sugImport">⬇ Importa suggerimento</button>'+
+    (DB.suggestions.length?'<button class="btn sec" id="sugClear">🗑 Svuota</button>':'')+'</div>';
+  if(!DB.suggestions.length){html+='<div class="empty">Nessun suggerimento in attesa.<br>Quando un amico ti manda un consiglio (codice o file), importalo qui: resterà in lista finché non decidi tu — con calma, uno alla volta.</div>';v.innerHTML=html;bindSug(v);return;}
+  const senders=[...new Set(DB.suggestions.map(s=>s.from||"?"))];
+  if(senders.length>1)html+='<div class="chips">'+["__all__",...senders].map(f=>'<span class="chip '+(sugFilter===f?"on":"")+'" data-sf="'+esc(f)+'">'+(f==="__all__"?"Tutti":esc(f||"?"))+'</span>').join("")+'</div>';
+  let arr=DB.suggestions.map((s,i)=>({s,i})).reverse();
+  if(sugFilter!=="__all__")arr=arr.filter(x=>(x.s.from||"?")===sugFilter);
+  html+=arr.map(x=>{const s=x.s,i=x.i;
+    return '<div class="srcrow" style="align-items:flex-start">'+
+      (s.cover?'<img src="'+img(s.cover,srcRef(s.source))+'" style="width:46px;height:64px;object-fit:cover;border-radius:6px;flex:none" onerror="this.style.visibility=\'hidden\'">':'')+
+      '<div class="info"><div class="nm">'+(esc(s.title)||'(apri per il titolo)')+' <span class="sub">('+esc(metaOf(s.source).name)+')</span></div>'+
+      '<div class="nt">Da: '+esc(s.from||"?")+'</div>'+
+      (s.msg?'<div class="nt" style="font-style:italic;color:#c7ccd6;margin-top:4px">“'+esc(s.msg)+'”</div>':'')+
+      '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sec" data-sopen="'+i+'" style="padding:5px 11px">Apri</button><button class="btn sec" data-sadd="'+i+'" style="padding:5px 11px">Aggiungi</button><button class="btn sec" data-sign="'+i+'" style="padding:5px 11px">Ignora</button></div>'+
+      '</div></div>';
+  }).join("");
+  v.innerHTML=html;bindSug(v);
+}
+function bindSug(v){
+  const ib=$("#sugImport");if(ib)ib.onclick=openSugImport;
+  const cl=$("#sugClear");if(cl)cl.onclick=async()=>{if(confirm("Svuotare tutti i suggerimenti?")){DB.suggestions=[];await saveDB();setSugBadge();renderSuggestions();}};
+  v.querySelectorAll("[data-sf]").forEach(c=>c.onclick=()=>{sugFilter=c.dataset.sf;renderSuggestions();});
+  v.querySelectorAll("[data-sopen]").forEach(b=>b.onclick=()=>{const s=DB.suggestions[+b.dataset.sopen];if(s)openDetail(s.source,s.id,s);});
+  v.querySelectorAll("[data-sadd]").forEach(b=>b.onclick=async()=>{const s=DB.suggestions[+b.dataset.sadd];if(!s)return;const k=key(s.source,s.id);if(!DB.follows[k])DB.follows[k]={source:s.source,id:s.id,title:s.title||"",cover:s.cover||"",category:"",lastChapterId:null};DB.suggestions.splice(+b.dataset.sadd,1);await saveDB();setSugBadge();renderSuggestions();toast("Aggiunto alla libreria ✓");});
+  v.querySelectorAll("[data-sign]").forEach(b=>b.onclick=async()=>{DB.suggestions.splice(+b.dataset.sign,1);await saveDB();setSugBadge();renderSuggestions();});
+}
 function malContentHtml(m){
   let h="";
   const alt=[];
@@ -542,24 +649,6 @@ async function resumeReading(src,id){
     openReader(src,d.chapters,idx,k,d.title,d.cover||"",srcRef(src),prog?prog.lastPage||0:0);
   }catch(e){openDetail(src,id);}
 }
-async function toggleFollow(src,id,d,cover){
-  const k=key(src,id);
-  if(DB.follows[k]){delete DB.follows[k];toast("Rimosso dalla libreria");}
-  else{DB.follows[k]={source:src,id,title:d.title,cover,category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null};toast("Aggiunto ✓");}
-  await saveDB();
-  const b=$("#followBtn");if(!b)return;
-  const on=!!DB.follows[k];
-  b.classList.toggle("on",on);b.textContent=on?'✓ Nella libreria':'+ Aggiungi alla libreria';
-  const actions=b.parentElement;let sel=$("#catSel");
-  if(on&&!sel){
-    sel=document.createElement("select");sel.id="catSel";sel.style.padding="9px 11px";
-    sel.innerHTML=["",...CATS].map(c=>'<option value="'+esc(c)+'">'+(c||"Senza stato")+'</option>').join("");
-    sel.value=DB.follows[k].category||"";
-    sel.onchange=()=>{if(DB.follows[k]){DB.follows[k].category=sel.value;saveDB();toast("Stato aggiornato");}};
-    actions.appendChild(sel);
-  }else if(!on&&sel){sel.remove();}
-}
-
 // ---------- library ----------
 function renderLibrary(){
   const v=$("#view-library");
@@ -587,6 +676,7 @@ function renderLibrary(){
     '<select id="bkCat" style="padding:7px 10px"><option value="">Sposta in stato…</option>'+["",...CATS].map(c=>'<option value="'+esc(c)+'">'+(c||"Senza stato")+'</option>').join("")+'</select>'+
     '<button class="btn sec" id="bkRead" style="padding:7px 12px">Segna in pari</button>'+
     '<button class="btn sec" id="bkDl" style="padding:7px 12px">⬇ Scarica</button>'+
+    '<button class="btn sec" id="bkShare" style="padding:7px 12px">↗ Consiglia</button>'+
     '<button class="btn sec" id="bkRm" style="padding:7px 12px">🗑 Rimuovi</button>'+
     '<button class="btn sec" id="bkAll" style="padding:7px 12px">Tutti</button>'+
     '<button class="btn sec" id="bkNone" style="padding:7px 12px">Nessuno</button></div>';
@@ -640,6 +730,7 @@ function bindLib(v){
   bind("bkNone",()=>{selSet.clear();renderLibrary();});
   bind("bkRm",async()=>{if(!selSet.size)return;if(confirm("Rimuovere "+selSet.size+" manga dalla libreria?")){selSet.forEach(k=>delete DB.follows[k]);selSet.clear();await saveDB();renderLibrary();}});
   bind("bkRead",async()=>{selSet.forEach(k=>{if(DB.follows[k])DB.follows[k].unread=0;});await saveDB();renderLibrary();toast("Segnati in pari");});
+  bind("bkShare",()=>{const items=[...selSet].map(k=>DB.follows[k]).filter(Boolean).map(o=>({source:o.source,id:o.id,title:o.title,cover:o.cover}));if(items.length)openShareModal(items);});
   bind("bkDl",async()=>{if(!selSet.size)return;if(confirm("Scaricare TUTTI i capitoli di "+selSet.size+" manga? Può essere molto pesante."))bulkDownload([...selSet]);});
   const bc=$("#bkCat");if(bc)bc.onchange=async()=>{selSet.forEach(k=>{if(DB.follows[k])DB.follows[k].category=bc.value;});await saveDB();renderLibrary();toast("Stato aggiornato");};
   v.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async e=>{e.stopPropagation();delete DB.follows[b.dataset.rm];await saveDB();renderLibrary();});
@@ -931,14 +1022,23 @@ function reviewImport(notfound){
   };
 }
 
+// ---------- chiusura app ----------
+async function quitApp(){
+  if(!confirm("Chiudere MakReader? Il programma si spegnerà; potrai riaprirlo dall'icona."))return;
+  try{await fetch("/quit",{method:"POST"});}catch(e){}
+  document.body.innerHTML='<div style="padding:70px 20px;text-align:center;color:#9aa3b2;font-family:-apple-system,sans-serif;font-size:15px">MakReader è stato chiuso.<br>Puoi chiudere questa scheda del browser.</div>';
+}
+$("#quitTop").onclick=quitApp;
+
 // ---------- init ----------
 (async function(){
   try{DB=await jget("/data");dataLoaded=true;}catch(e){alert("MakReader: impossibile leggere la libreria dal server. Per sicurezza non salverò nulla finché non ricarichi la pagina.");}
   try{const s=await jget("/sources");META=s.meta;if(s.config&&s.config.order){DB.sources=s.config;}}catch(e){}
   if(!DB.sources||!DB.sources.order){DB.sources={order:META.map(m=>m.id),enabled:Object.fromEntries(META.map(m=>[m.id,true]))};}
   if(DB.settings)SET=Object.assign(SET,DB.settings);
+  if(!DB.suggestions)DB.suggestions=[];
   await loadDownloads();
-  fillSourceSelect();renderLibrary();
+  fillSourceSelect();renderLibrary();setSugBadge();
   // controllo non letti in background (non blocca l'avvio)
   setTimeout(()=>{if(Object.keys(DB.follows).length)autoCheck(false);},1500);
   scheduleAuto();
