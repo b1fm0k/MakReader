@@ -27,9 +27,21 @@ if getattr(sys, "frozen", False):
     _BUNDLE = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     HERE = os.path.join(os.path.expanduser("~"), "MakReader-dati")
     os.makedirs(HERE, exist_ok=True)
+
+    def _ver_tuple(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return tuple(int(x) for x in str(json.load(f).get("version", "0")).split("."))
+        except Exception:
+            return None
+    _bundle_ver = _ver_tuple(os.path.join(_BUNDLE, "version.json"))
+    _data_ver = _ver_tuple(os.path.join(HERE, "version.json"))
+    # rinfresca i file dell'app se questo programma è più recente di quelli già in cartella
+    # (così un .exe/.app nuovo porta davvero le sue novità; libreria e download restano intatti)
+    _refresh = (_data_ver is None) or (_bundle_ver is not None and _bundle_ver > _data_ver)
     for _fn in ("index.html", "sources.py", "downloads.py", "version.json", "makreader.png"):
         _dst, _src = os.path.join(HERE, _fn), os.path.join(_BUNDLE, _fn)
-        if not os.path.exists(_dst) and os.path.exists(_src):
+        if os.path.exists(_src) and (_refresh or not os.path.exists(_dst)):
             try:
                 shutil.copy(_src, _dst)
             except Exception:
@@ -120,6 +132,19 @@ def local_version():
             return str(json.load(f).get("version", "0"))
     except Exception:
         return "0"
+
+
+def version_tuple(v):
+    parts = []
+    for p in str(v).split("."):
+        num = ""
+        for ch in p:
+            if ch.isdigit():
+                num += ch
+            else:
+                break
+        parts.append(int(num) if num else 0)
+    return tuple(parts)
 
 
 _SAVE_LOCK = threading.Lock()
@@ -237,8 +262,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/search":
             sid = q.get("source", [""])[0]
             query = q.get("q", [""])[0]
+            by = q.get("by", ["title"])[0]
             try:
-                self._json({"results": sources.REGISTRY[sid].search(query)})
+                self._json({"results": sources.REGISTRY[sid].search(query, by)})
             except KeyError:
                 self._json({"error": "sorgente sconosciuta"}, 400)
             except Exception as e:
@@ -294,8 +320,9 @@ class Handler(BaseHTTPRequestHandler):
                 remote = json.loads(sources.http_get(raw_url("version.json")))
                 cur = local_version()
                 lat = str(remote.get("version", "?"))
+                newer = version_tuple(lat) > version_tuple(cur)
                 self._json({"configured": True, "current": cur, "latest": lat,
-                            "update": lat != cur, "notes": remote.get("notes", "")})
+                            "update": newer, "notes": remote.get("notes", "")})
             except Exception as e:
                 self._json({"configured": True, "current": local_version(), "error": str(e)}, 502)
             return

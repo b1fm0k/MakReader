@@ -1,4 +1,4 @@
 {
-  "version": "1.0.2b",
-  "notes": "Ora puoi consigliare manga agli amici: pulsante Consiglia e nuova sezione Suggerimenti.\nScheda manga più ordinata e pulsante per chiudere l'app in alto a destra.\nPiccole correzioni di sicurezza e stabilità."
+  "version": "1.0.3",
+  "notes": "Ricerca anche per autore.\nConsigli di manga tra amici (sezione Suggerimenti).\nLibreria riordinata e correzioni varie.\nUsa solo numeri nella versione (es. 1.0.4), niente lettere."
 }

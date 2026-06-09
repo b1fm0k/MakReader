@@ -139,7 +139,7 @@ class Source:
     lang = "en"
     note = ""
 
-    def search(self, query):
+    def search(self, query, by="title"):
         raise NotImplementedError
 
     def details(self, manga_id):
@@ -158,8 +158,11 @@ class WeebCentral(Source):
     base = "https://weebcentral.com"
     note = "Successore di MangaSee. Stabile."
 
-    def search(self, query):
-        url = (self.base + "/search/data?author=&text=" + urllib.parse.quote(query) +
+    def search(self, query, by="title"):
+        qp = urllib.parse.quote(query)
+        af = qp if by == "author" else ""
+        tf = "" if by == "author" else qp
+        url = (self.base + "/search/data?author=" + af + "&text=" + tf +
                "&sort=Best+Match&order=Descending&official=Any&anime=Any&adult=Any"
                "&display_mode=Full+Display")
         html = http_get(url, referer=self.base + "/")
@@ -249,8 +252,9 @@ class _FMcDN(Source):
         url = _abs(path_or_url, self.base)
         return http_get(url, referer=referer or (self.base + "/"), cookie=self.cookie)
 
-    def search(self, query):
-        html = self._get("/search?title=" + urllib.parse.quote(query) + "&page=1")
+    def search(self, query, by="title"):
+        field = "author" if by == "author" else "title"
+        html = self._get("/search?" + field + "=" + urllib.parse.quote(query) + "&page=1")
         # Restringi al contenitore dei risultati (evita sidebar / "manga popolari")
         lists = re.findall(r'<ul class="manga-list-\d-list[^"]*">(.*?)</ul>', html, re.S)
         scope = max(lists, key=len) if lists else ""
@@ -329,8 +333,15 @@ class _FMcDN(Source):
         page = self._get(manga_id, referer=self.base + "/")
         sc = re.search(r'<ul class="detail-main-list[^"]*">(.*?)</ul>', page, re.S)
         scope = sc.group(1) if sc else page
-        m = re.search(r"/c([\d.]+)/1\.html", scope)
-        return m.group(1) if m else ""
+        best, best_f = "", -1.0
+        for n in re.findall(r"/c([\d.]+)/1\.html", scope):
+            try:
+                fv = float(n)
+            except ValueError:
+                continue
+            if fv > best_f:
+                best_f, best = fv, n
+        return best
 
     def pages(self, chapter_id):
         page = self._get(chapter_id, referer=self.base + "/")
@@ -397,11 +408,18 @@ class MangaDex(Source):
     lang = "en"
     chlabel = "Chapter"
 
-    def search(self, query):
-        url = (self.base + "/manga?title=" + urllib.parse.quote(query) +
-               "&limit=24&includes[]=cover_art&order[relevance]=desc"
-               "&availableTranslatedLanguage[]=" + self.lang +
-               "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica")
+    def search(self, query, by="title"):
+        common = ("&limit=24&includes[]=cover_art&availableTranslatedLanguage[]=" + self.lang +
+                  "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica")
+        if by == "author":
+            au = json.loads(http_get(self.base + "/author?limit=5&name=" + urllib.parse.quote(query)))
+            ids = [a["id"] for a in au.get("data", []) if a.get("id")]
+            if not ids:
+                return []
+            url = self.base + "/manga?" + "&".join("authors[]=" + i for i in ids[:1]) + common
+        else:
+            url = (self.base + "/manga?title=" + urllib.parse.quote(query) +
+                   "&order[relevance]=desc" + common)
         data = json.loads(http_get(url))
         out = []
         for m in data.get("data", []):
@@ -492,7 +510,9 @@ class MangaWorld(Source):
     lang = "it"
     note = "Sito italiano: scan in italiano. Scraping (può cambiare)."
 
-    def search(self, query):
+    def search(self, query, by="title"):
+        if by == "author":
+            return []  # MangaWorld filtra per autore solo via ID: ricerca per autore non supportata
         html = http_get(self.base + "/archive?keyword=" + urllib.parse.quote(query),
                         referer=self.base + "/")
         out, seen = [], set()

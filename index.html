@@ -32,8 +32,14 @@
   .card .t{font-size:13px;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .card .s{font-size:11px;color:var(--muted);margin-top:4px}
   .srcpill{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:7px}
-  .rmbtn{position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.7);color:#fff;border:none;width:24px;height:24px;border-radius:50%;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center}
+  .rmbtn{position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.7);color:#fff;border:none;width:24px;height:24px;border-radius:50%;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s}
+  .card:hover .rmbtn{opacity:1}
   .rmbtn:hover{background:#c0392b}
+  .libhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 12px}
+  .moremenu{position:relative;display:inline-block}
+  .moremenu>summary{list-style:none}.moremenu>summary::-webkit-details-marker{display:none}
+  .morepop{position:absolute;z-index:40;top:calc(100% + 6px);left:0;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:210px;box-shadow:0 10px 34px rgba(0,0,0,.55)}
+  .morepop .btn{width:100%;text-align:left}
   .unread{position:absolute;top:8px;right:8px;background:var(--good);color:#06231a;font-size:11px;font-weight:800;padding:2px 7px;border-radius:9px}
   .inlib{position:absolute;top:8px;right:8px;z-index:2;background:var(--good);color:#06231a;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
   .dlpill{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px}
@@ -155,6 +161,7 @@
       <button class="tab" data-tab="sources">Sorgenti</button>
     </div>
     <div class="search">
+      <select id="searchBy" title="Cerca per"><option value="title">Titolo</option><option value="author">Autore</option></select>
       <select id="srcSel" title="Sorgente di ricerca"></select>
       <input id="searchInput" type="search" placeholder="Cerca manga…" autocomplete="off">
     </div>
@@ -201,6 +208,7 @@ let sugFilter="__all__";
 let SET={dir:"ltr",width:"M",autoHours:6,notify:false};
 let META=[];               // [{id,name,note,lang,base}]
 let curSearchSource=localStorage.getItem("searchSource")||"__all__";
+let searchBy=localStorage.getItem("searchBy")||"title";
 let searchGroup=localStorage.getItem("searchGroup")!=="0";
 let recentSearches=JSON.parse(localStorage.getItem("recentSearches")||"[]");
 let libFilter=localStorage.getItem("libFilter")||"__all__";
@@ -243,6 +251,8 @@ function fillSourceSelect(){
   sel.value=curSearchSource;
 }
 $("#srcSel").onchange=e=>{curSearchSource=e.target.value;localStorage.setItem("searchSource",curSearchSource);const q=$("#searchInput").value.trim();if(q)doSearch(q);};
+$("#searchBy").value=searchBy;
+$("#searchBy").onchange=e=>{searchBy=e.target.value;localStorage.setItem("searchBy",searchBy);$("#searchInput").placeholder=searchBy==="author"?"Cerca autore…":"Cerca manga…";const q=$("#searchInput").value.trim();if(q)doSearch(q);};
 
 function renderSources(){
   const v=$("#view-sources");
@@ -328,7 +338,7 @@ async function doSearch(q){
   v.innerHTML=recentChipsHtml()+'<h3 class="sec">'+esc(metaOf(curSearchSource).name)+': '+esc(q)+'</h3><div class="loading"><div class="spin"></div></div>';
   bindRecentChips(v);
   try{
-    const d=await jget(`/search?source=${encodeURIComponent(curSearchSource)}&q=${encodeURIComponent(q)}`);
+    const d=await jget(`/search?source=${encodeURIComponent(curSearchSource)}&q=${encodeURIComponent(q)}&by=${searchBy}`);
     const lo=v.querySelector(".loading");if(lo)lo.remove();
     if(!d.results.length){
       v.insertAdjacentHTML("beforeend",'<div class="empty">Nessun risultato su '+esc(metaOf(curSearchSource).name)+'.<br><button class="btn" id="extAll" style="margin-top:14px">Estendi a tutte le sorgenti</button></div>');
@@ -355,7 +365,7 @@ async function multiSearch(q,en){
   if(searchGroup){
     for(const s of en){
       const sec=document.createElement("div");sec.innerHTML='<div class="fld">'+esc(metaOf(s).name)+' …</div>';area.appendChild(sec);
-      try{const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`);
+      try{const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}&by=${searchBy}`);
         const rs=d.results||[];
         if(rs.length){sec.innerHTML='<div class="fld">'+esc(metaOf(s).name)+' ('+rs.length+')</div>';
           const g=document.createElement("div");g.className="grid";g.style.marginBottom="20px";g.innerHTML=rs.map(m=>cardHtml(s,m)).join("");sec.appendChild(g);bindSearchCards(g);}
@@ -367,7 +377,7 @@ async function multiSearch(q,en){
     const grid=document.createElement("div");grid.className="grid";area.appendChild(grid);
     let done=0;
     await Promise.all(en.map(async s=>{
-      try{const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`);
+      try{const d=await jget(`/search?source=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}&by=${searchBy}`);
         const frag=(d.results||[]).map(m=>cardHtml(s,m)).join("");
         if(frag){grid.insertAdjacentHTML("beforeend",frag);bindSearchCards(grid);}
       }catch(e){}
@@ -653,17 +663,17 @@ async function resumeReading(src,id){
 function renderLibrary(){
   const v=$("#view-library");
   const ids=Object.keys(DB.follows);
-  let html='<div class="toolbar"><button class="btn sec" id="importMal">⬇ Importa da MyAnimeList</button>'+
+  let html='<div class="toolbar">'+
     (ids.length?'<button class="btn sec" id="updBtn">🔄 Cerca aggiornamenti</button>':'')+
     '<button class="btn sec" id="dlBtn">⬇ Download</button>'+
-    (ids.length?`<button class="btn sec" id="clearLib">🗑 Svuota (${ids.length})</button>`:'')+
-    (ids.length?`<button class="btn sec ${libGroup?'on':''}" id="groupBtn">▦ Categorie</button>`:'')+
     (ids.length?`<button class="btn sec ${libSelect?'on':''}" id="selBtn">☑ Seleziona</button>`:'')+
-    `<button class="btn sec" id="backupBtn">⤓ Backup</button>`+
-    `<button class="btn sec" id="restoreBtn">⤒ Ripristina</button>`+
-    (ids.length?`<input id="libSearch" type="search" placeholder="Filtra…" autocomplete="off" value="${esc(libQuery)}" style="margin-left:auto;width:160px">`:'')+
-    (ids.length?`<button class="btn sec" id="densBtn" title="Densità griglia">${libDensity==='compact'?'▦':'▥'}</button>`:'')+
-    (ids.length?`<select id="sortSel" style="padding:9px 11px"><option value="recent">Recenti</option><option value="alpha">A-Z</option><option value="unread">Non letti</option><option value="updated">Aggiornati</option></select>`:'')+'</div>';
+    (ids.length?`<button class="btn sec ${libGroup?'on':''}" id="groupBtn">▦ Categorie</button>`:'')+
+    '<details class="moremenu"><summary class="btn sec">⋯ Altro</summary><div class="morepop">'+
+      '<button class="btn sec" id="importMal">⬇ Importa da MyAnimeList</button>'+
+      '<button class="btn sec" id="backupBtn">⤓ Backup</button>'+
+      '<button class="btn sec" id="restoreBtn">⤒ Ripristina</button>'+
+      (ids.length?`<button class="btn sec" id="clearLib">🗑 Svuota (${ids.length})</button>`:'')+
+    '</div></details></div>';
   if(DB.history.length&&!libQuery.trim()&&!libSelect){
     html+='<h3 class="sec">Continua a leggere</h3><div class="grid" style="margin-bottom:28px">'+
       DB.history.slice(0,6).map(h=>cardMini(h,{resume:true})).join("")+'</div>';
@@ -671,6 +681,11 @@ function renderLibrary(){
   if(!ids.length){html+='<div class="empty">Libreria vuota. Usa <b>Cerca</b> per trovare un manga, o gestisci le fonti in <b>Sorgenti</b>.</div>';v.innerHTML=html;bindLib(v);return;}
   // conteggio capitoli scaricati per manga (indicatore offline)
   dlCount={};DLITEMS.forEach(i=>{if(i.status==="done")dlCount[i.manga_key]=(dlCount[i.manga_key]||0)+1;});
+  // intestazione libreria con Filtra/Ordina (riferiti alla libreria, non a "Continua a leggere")
+  html+='<div class="libhead"><h3 class="sec" style="margin:0">La mia libreria ('+ids.length+')</h3>'+
+    '<input id="libSearch" type="search" placeholder="Filtra…" autocomplete="off" value="'+esc(libQuery)+'" style="margin-left:auto;width:170px">'+
+    '<button class="btn sec" id="densBtn" title="Densità griglia">'+(libDensity==="compact"?"▦":"▥")+'</button>'+
+    '<select id="sortSel" style="padding:9px 11px"><option value="recent">Recenti</option><option value="alpha">A-Z</option><option value="unread">Non letti</option><option value="updated">Aggiornati</option></select></div>';
   // barra azioni in blocco
   if(libSelect)html+='<div class="bulkbar"><span class="cnt">'+selSet.size+' selezionati</span>'+
     '<select id="bkCat" style="padding:7px 10px"><option value="">Sposta in stato…</option>'+["",...CATS].map(c=>'<option value="'+esc(c)+'">'+(c||"Senza stato")+'</option>').join("")+'</select>'+
@@ -706,7 +721,7 @@ function renderLibrary(){
     if(libFilter==="__new__")farr=farr.filter(x=>(x.o.unread||0)>0);
     else if(libFilter!=="__all__")farr=farr.filter(x=>(x.o.category||"")===libFilter);
     farr.sort(sortFn);
-    html+='<h3 class="sec">La mia libreria ('+farr.length+')</h3><div class="grid'+dens+'">'+(farr.length?farr.map(x=>cardMini(x.o,{rm:true})).join(""):'<div class="empty">Nessun risultato.</div>')+'</div>';
+    html+='<div class="grid'+dens+'">'+(farr.length?farr.map(x=>cardMini(x.o,{rm:true})).join(""):'<div class="empty">Nessun risultato.</div>')+'</div>';
   }
   v.innerHTML=html;
   if(libQuery){const e=$("#libSearch");if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}}
@@ -856,7 +871,7 @@ function updateDlBtn(){const b=$("#rDl");if(reader.offline){b.textContent="✓";
 
 $("#rClose").onclick=()=>{
   $("#reader").style.display="none";
-  if(curDetail&&!$("#view-detail").classList.contains("hidden")){openDetail(curDetail.src,curDetail.id);return;}
+  if(reader.source&&reader.key){openDetail(reader.source,reader.key.split("||").slice(1).join("||"));return;}
   const at=document.querySelector(".tab.active");showTab(at?at.dataset.tab:"library");
 };
 $("#rPrev").onclick=()=>reader.paged?prevPage():prevChapter();
@@ -903,11 +918,12 @@ async function autoCheck(notify){
   async function worker(){
     while(i<keys.length){
       const k=keys[i++], f=DB.follows[k];
-      try{const d=await jget(`/details?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
-        if(d.chapters.length){
-          f.latestNum=d.chapters[d.chapters.length-1].number;
-          const base=f.lastChapterId, idx=base?d.chapters.findIndex(c=>c.id===base):-1;
-          const unread=idx>=0?(d.chapters.length-1-idx):(base?d.chapters.length:0);
+      try{const d=await jget(`/latest?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
+        if(d.number){
+          f.latestNum=d.number;
+          const lr=parseFloat((DB.progress[k]&&DB.progress[k].lastChapterNum)||"")||0;
+          const lt=parseFloat(d.number)||0;
+          const unread=(lr>0)?Math.max(0,Math.round(lt-lr)):0;
           f.unread=unread; if(unread>0)newCount++;
         }
       }catch(e){}
@@ -1032,7 +1048,10 @@ $("#quitTop").onclick=quitApp;
 
 // ---------- init ----------
 (async function(){
-  try{DB=await jget("/data");dataLoaded=true;}catch(e){alert("MakReader: impossibile leggere la libreria dal server. Per sicurezza non salverò nulla finché non ricarichi la pagina.");}
+  for(let attempt=0;attempt<6 && !dataLoaded;attempt++){
+    try{DB=await jget("/data");dataLoaded=true;}catch(e){await new Promise(r=>setTimeout(r,400));}
+  }
+  if(!dataLoaded){const lv=document.getElementById("view-library");if(lv)lv.innerHTML='<div class="errbox" style="margin:20px">Non riesco a leggere la libreria dal server. Ricarica la pagina (Cmd/Ctrl+R). Per sicurezza non salvo nulla finché non ci riesco.</div>';}
   try{const s=await jget("/sources");META=s.meta;if(s.config&&s.config.order){DB.sources=s.config;}}catch(e){}
   if(!DB.sources||!DB.sources.order){DB.sources={order:META.map(m=>m.id),enabled:Object.fromEntries(META.map(m=>[m.id,true]))};}
   if(DB.settings)SET=Object.assign(SET,DB.settings);
