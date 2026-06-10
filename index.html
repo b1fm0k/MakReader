@@ -487,7 +487,7 @@ async function openDetail(src,id,known){
     const kk=key(src,id),ff=DB.follows[kk],w=$("#libCtrlWrap");if(!w)return;
     if(!ff){
       w.innerHTML='<button class="btn" id="followBtn">+ Aggiungi alla libreria</button>';
-      $("#followBtn").onclick=async()=>{DB.follows[kk]={source:src,id,title:d.title||(known&&known.title)||"",cover:cover||"",category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null};await saveDB();toast("Aggiunto alla libreria ✓");renderLibCtrl();};
+      $("#followBtn").onclick=async()=>{DB.follows[kk]={source:src,id,title:d.title||(known&&known.title)||"",cover:cover||"",category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null,latestNum:d.chapters.length?(d.chapters[d.chapters.length-1].number||""):""};await saveDB();toast("Aggiunto alla libreria ✓");renderLibCtrl();};
     }else{
       w.innerHTML='<select id="libState" class="libstate">'+["",...CATS].map(c=>'<option value="'+esc(c)+'" '+((ff.category||"")===c?'selected':'')+'>'+(c?('✓ '+esc(c)):'✓ Nella libreria')+'</option>').join('')+'<option value="__remove__">✕ Rimuovi dalla libreria</option></select>';
       $("#libState").onchange=async e=>{const val=e.target.value;if(val==="__remove__"){delete DB.follows[kk];await saveDB();toast("Rimosso dalla libreria");renderLibCtrl();return;}DB.follows[kk].category=val;await saveDB();toast("Stato aggiornato");};
@@ -804,7 +804,8 @@ async function renderUpdates(){
     try{const d=await jget(`/details?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
       if(!d.chapters.length)continue;
       const latest=d.chapters[d.chapters.length-1];
-      f.latestNum=latest.number;
+      const nums=d.chapters.map(c=>parseFloat(c.number)).filter(n=>!isNaN(n));
+      f.latestNum=nums.length?String(Math.max(...nums)):(latest.number||"");
       const idx=f.lastChapterId?d.chapters.findIndex(c=>c.id===f.lastChapterId):-1;
       const unread=(f.category==="Dropped")?0:(idx>=0?(d.chapters.length-1-idx):(f.lastChapterId?d.chapters.length:0));
       f.unread=unread;

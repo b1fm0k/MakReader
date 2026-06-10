@@ -1,4 +1,4 @@
 {
-  "version": "1.0.6",
-  "notes": "I manga in stato \"Dropped\" non mostrano più i capitoli non letti (niente badge, conteggio Novità o notifiche).\nRiavvio automatico dopo l'aggiornamento.\nRicerca anche per autore.\nConsigli di manga tra amici (sezione Suggerimenti).\nUsa solo numeri nella versione (es. 1.0.7), niente lettere."
+  "version": "1.1.0",
+  "notes": "Nuova sorgente italiana finalmente funzionante: MangaWorld (ricerca, scheda, lettura).\nWeebCentral: risolto il \"?\" sul numero dei capitoli.\nRiavvio automatico dopo l'aggiornamento: non serve più chiudere e riaprire a mano.\nI manga \"Dropped\" non mostrano più i capitoli non letti.\nImport da MyAnimeList più sicuro.\nRicerca anche per autore e sezione Suggerimenti tra amici.\nVarie correzioni e migliorie di stabilità."
 }

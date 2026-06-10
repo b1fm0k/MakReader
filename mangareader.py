@@ -19,7 +19,7 @@ import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.1.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -50,6 +50,14 @@ if getattr(sys, "frozen", False):
                 pass
 else:
     HERE = os.path.dirname(os.path.abspath(__file__))
+
+# I DATI dell'utente (libreria, download, impostazioni) stanno SEMPRE in
+# ~/MakReader-dati, indipendentemente da come avvii l'app. Così la versione
+# "da sorgente" (per testare) e l'app installata condividono la stessa
+# libreria e gli stessi progressi di lettura: niente più travasi a mano.
+# Il CODICE invece resta in HERE (cartella sorgenti da script, bundle se .app/.exe).
+DATA_DIR = os.path.join(os.path.expanduser("~"), "MakReader-dati")
+os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def _load_mod(name):
@@ -146,10 +154,10 @@ def normalize_mal(d):
 # 4005 = goroawase di "manga" (4=yo, 0=ma, 0=n, 5=ga)
 PORT_CANDIDATES = [4005, 4456, 5577, 6680, 7788, 8123, 9123, 0]
 CURRENT_PORT = 0
-DATA_FILE = os.path.join(HERE, "library.json")
-INDEX_FILE = os.path.join(HERE, "index.html")
-VERSION_FILE = os.path.join(HERE, "version.json")
-DL = downloads.Manager(HERE)
+DATA_FILE = os.path.join(DATA_DIR, "library.json")   # dati condivisi
+INDEX_FILE = os.path.join(HERE, "index.html")        # codice/app
+VERSION_FILE = os.path.join(HERE, "version.json")    # codice/app
+DL = downloads.Manager(DATA_DIR)                      # download condivisi
 UPDATE_FILES = ["index.html", "sources.py", "downloads.py", "version.json"]
 
 
@@ -469,6 +477,12 @@ class Handler(BaseHTTPRequestHandler):
         if p.path == "/update/apply":
             if not UPDATE_REPO:
                 self._json({"error": "repository non configurato"}, 400)
+                return
+            if not getattr(sys, "frozen", False):
+                # Modalità sorgente (sviluppatore): NON sovrascrivere i file locali
+                # con quelli di GitHub, altrimenti si perdono le modifiche non caricate.
+                self._json({"error": "Aggiornamento disabilitato in modalità sorgente: "
+                                     "stai girando dai file locali, non li sovrascrivo con GitHub."}, 400)
                 return
             try:
                 for fn in UPDATE_FILES:

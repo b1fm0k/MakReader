@@ -217,11 +217,24 @@ class WeebCentral(Source):
     def latest(self, manga_id):
         sid = re.search(r"/series/([0-9A-Za-z]+)", manga_id).group(1)
         h = http_get("%s/series/%s/full-chapter-list" % (self.base, sid), referer=manga_id)
-        m = re.search(r'/chapters/[^"]+"[^>]*>(.*?)</a>', h, re.S)
-        if m:
+        # scansiona TUTTI i capitoli e prende il numero più alto (robusto: non
+        # dipende dal primo link, che a volte è un capitolo speciale senza numero)
+        best, best_f, count = "", -1.0, 0
+        for m in re.finditer(r'/chapters/[^"]+"[^>]*>(.*?)</a>', h, re.S):
+            count += 1
             nm = re.search(r"([\d.]+)", re.sub(r"<[^>]+>", " ", m.group(1)))
-            return nm.group(1) if nm else ""
-        return ""
+            if not nm:
+                continue
+            try:
+                fv = float(nm.group(1))
+            except ValueError:
+                continue
+            if fv > best_f:
+                best_f, best = fv, nm.group(1)
+        # se nessun capitolo ha un numero leggibile ma ce ne sono, usa il conteggio
+        if not best and count:
+            return str(count)
+        return best
 
     def pages(self, chapter_id):
         url = chapter_id + "/images?is_prev=False&current_page=1&reading_style=long_strip"
@@ -510,37 +523,52 @@ class MangaWorld(Source):
     lang = "it"
     note = "Sito italiano: scan in italiano. Scraping (può cambiare)."
 
+    # NB: MangaWorld serve HTML MINIFICATO con attributi anche SENZA virgolette
+    # (es.  href=https://...  title=Berserk ). Tutte le regex qui sotto tollerano
+    # valori tra "..." , '...' oppure senza virgolette.
+
     def search(self, query, by="title"):
         if by == "author":
             return []  # MangaWorld filtra per autore solo via ID: ricerca per autore non supportata
         html = http_get(self.base + "/archive?keyword=" + urllib.parse.quote(query),
                         referer=self.base + "/")
         out, seen = [], set()
-        for blk in re.split(r'class="entry', html):
-            mu = re.search(r'href="((?:https?://[^"]*)?/manga/\d+/[^"#?]+?)"', blk)
-            if not mu:
-                continue
-            url = _abs(mu.group(1), self.base)
+        # il link "thumb" di ogni risultato porta href (al manga) e title (il titolo)
+        pat = re.compile(
+            r'<a\b[^>]*?href=["\']?((?:https?://[^"\'>\s]*)?/manga/\d+/[^"\'>\s#?]+)["\']?'
+            r'[^>]*?title=(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+            re.I | re.S)
+        for m in pat.finditer(html):
+            url = _abs(m.group(1), self.base)
             if "/read/" in url or url in seen:
                 continue
             seen.add(url)
-            tt = (re.search(r'manga-title[^>]*>\s*([^<]+?)\s*<', blk) or
-                  re.search(r'href="[^"]*/manga/\d+/[^"]*"[^>]*>\s*([^<]+?)\s*<', blk))
-            title = _clean(tt.group(1)) if tt else url.rstrip("/").rsplit("/", 1)[-1].replace("-", " ")
-            cm = re.search(r'<img[^>]+(?:data-src|src)="([^"]+)"', blk)
+            title = _clean(m.group(2) or m.group(3) or m.group(4) or
+                           url.rstrip("/").rsplit("/", 1)[-1].replace("-", " "))
+            # copertina: primo <img src=...> subito dopo questo link
+            cm = re.search(r'<img\b[^>]*?(?:data-src|src)=["\']?([^"\'>\s]+)',
+                           html[m.end():m.end() + 400], re.I)
             cover = _abs(cm.group(1), self.base) if cm else ""
             out.append({"id": url, "title": title, "cover": cover, "status": ""})
         return out
 
     def _chapters(self, page):
         chapters, seen = [], set()
-        for m in re.finditer(r'href="((?:https?://[^"]*)?/manga/\d+/[^"]+?/read/[^"#?]+?)"[^>]*>(.*?)</a>',
-                             page, re.S):
+        for m in re.finditer(
+                r'href=["\']?((?:https?://[^"\'>\s]*)?/manga/\d+/[^"\'>\s]+?/read/[^"\'>\s#?]+)["\']?[^>]*>(.*?)</a>',
+                page, re.S | re.I):
             curl = _abs(m.group(1), self.base)
             if curl in seen:
                 continue
-            seen.add(curl)
             txt = _clean(re.sub(r"<[^>]+>", " ", m.group(2)))
+            low = txt.lower()
+            # salta i pulsanti di navigazione (stesso URL dei capitoli veri): NON
+            # li aggiunge a 'seen', così il vero capitolo numerato passa comunque
+            if ("primo capitolo" in low or "ultimo capitolo" in low or
+                    low in ("leggi", "leggi ora", "inizia a leggere", "continua a leggere",
+                            "inizia", "continua")):
+                continue
+            seen.add(curl)
             nm = re.search(r"[Cc]apitolo\s+([\d.]+)", txt) or re.search(r"([\d.]+)", txt)
             chapters.append({"id": curl, "name": txt or "Capitolo",
                              "number": nm.group(1) if nm else ""})
@@ -553,25 +581,32 @@ class MangaWorld(Source):
         chapters.sort(key=_num)
         return chapters
 
+    def _meta(self, page, prop):
+        # content può essere tra "..." , '...' oppure SENZA virgolette (es. og:image = URL)
+        m = re.search(r'property=["\']?' + re.escape(prop) +
+                      r'["\']?[^>]*?content=(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', page, re.I)
+        return _clean(m.group(1) or m.group(2) or m.group(3)) if m else ""
+
     def details(self, manga_id):
         page = http_get(manga_id, referer=self.base + "/")
-        h = re.search(r'<h1[^>]*>\s*([^<]+?)\s*</h1>', page)
-        title = _clean(h.group(1)) if h else ""
+        h = re.search(r'<h1[^>]*>\s*(.*?)\s*</h1>', page, re.S)
+        title = _clean(re.sub(r"<[^>]+>", " ", h.group(1))) if h else ""
         if not title:
-            og = re.search(r'property="og:title"[^>]+content="([^"]+)"', page)
-            title = _clean(og.group(1)) if og else ""
-        cm = re.search(r'property="og:image"[^>]+content="([^"]+)"', page)
-        cover = cm.group(1) if cm else ""
-        dm = re.search(r'id="noidungm"[^>]*>(.*?)</', page, re.S) or \
-            re.search(r'class="[^"]*description[^"]*"[^>]*>(.*?)</div>', page, re.S)
+            title = self._meta(page, "og:title")
+        title = re.sub(r"\s*(?:-\s*MangaWorld.*|\|.*)$", "", title, flags=re.I).strip()
+        cover = self._meta(page, "og:image")
+        dm = re.search(r'id=["\']?noidungm["\']?[^>]*>(.*?)</', page, re.S) or \
+            re.search(r'class=["\']?[^"\'>]*description[^"\'>]*["\']?[^>]*>(.*?)</div>', page, re.S)
         desc = _clean(re.sub(r"<[^>]+>", " ", dm.group(1))) if dm else ""
         if not desc:
-            md = re.search(r'name="description"[^>]+content="([^"]*)"', page)
-            desc = _clean(md.group(1)) if md else ""
+            desc = self._meta(page, "og:description")
+        if not desc:
+            md = re.search(r'name=["\']?description["\']?[^>]*?content=(?:"([^"]*)"|\'([^\']*)\')', page, re.I)
+            desc = _clean((md.group(1) or md.group(2))) if md else ""
         author = ", ".join(dict.fromkeys(
-            _clean(a) for a in re.findall(r'/archive\?author=[^"]*"[^>]*>([^<]+)<', page)))
-        genres = [_clean(g) for g in re.findall(r'/archive\?genre=[^"]*"[^>]*>([^<]+)<', page)][:12]
-        stm = re.search(r'/archive\?status=[^"]*"[^>]*>([^<]+)<', page)
+            _clean(a) for a in re.findall(r'/archive\?author=[^>]*>\s*([^<]+?)\s*<', page)))
+        genres = [_clean(g) for g in re.findall(r'/archive\?genre=[^>]*>\s*([^<]+?)\s*<', page)][:12]
+        stm = re.search(r'/archive\?status=[^>]*>\s*([^<]+?)\s*<', page)
         status = _clean(stm.group(1)) if stm else ""
         return {"title": title, "cover": cover, "description": desc,
                 "chapters": self._chapters(page), "author": author, "status": status,
@@ -585,10 +620,15 @@ class MangaWorld(Source):
     def pages(self, chapter_id):
         sep = "&" if "?" in chapter_id else "?"
         page = http_get(chapter_id + sep + "style=list", referer=self.base + "/")
-        pages = re.findall(r'<img[^>]+class="[^"]*page-image[^"]*"[^>]+(?:data-src|src)="([^"]+)"', page)
+        pages = []
+        for tag in re.findall(r'<img\b[^>]*page-image[^>]*>', page, re.I):
+            s = re.search(r'(?:data-src|src)=["\']?([^"\'>\s]+)', tag, re.I)
+            if s:
+                pages.append(s.group(1))
         if not pages:
-            pages = re.findall(r'<img[^>]+(?:data-src|src)="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"', page)
-            pages = [p for p in pages if "/read/" in p or "cdn" in p or "/uploads" in p or "/manga" in p]
+            cand = re.findall(r'<img\b[^>]*?(?:data-src|src)=["\']?([^"\'>\s]+\.(?:jpg|jpeg|png|webp)[^"\'>\s]*)',
+                              page, re.I)
+            pages = [p for p in cand if "/read/" in p or "cdn" in p or "/uploads" in p or "/manga" in p]
         return {"pages": [_abs(p, self.base) for p in pages], "referer": self.base + "/"}
 
 
