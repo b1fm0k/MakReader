@@ -7,6 +7,7 @@ Avvio:  python3 mangareader.py        (oppure: python3 mangareader.py 5599)
 import json
 import os
 import sys
+import time
 import gzip
 import shutil
 import socket
@@ -115,6 +116,7 @@ def normalize_mal(d):
 
 # 4005 = goroawase di "manga" (4=yo, 0=ma, 0=n, 5=ga)
 PORT_CANDIDATES = [4005, 4456, 5577, 6680, 7788, 8123, 9123, 0]
+CURRENT_PORT = 0
 DATA_FILE = os.path.join(HERE, "library.json")
 INDEX_FILE = os.path.join(HERE, "index.html")
 VERSION_FILE = os.path.join(HERE, "version.json")
@@ -422,6 +424,19 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             threading.Timer(0.4, lambda: os._exit(0)).start()
             return
+        if p.path == "/restart":
+            self._json({"ok": True})
+
+            def _restart():
+                try:
+                    if getattr(sys, "frozen", False):
+                        os.execv(sys.executable, [sys.executable, str(CURRENT_PORT)])
+                    else:
+                        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), str(CURRENT_PORT)])
+                except Exception:
+                    os._exit(0)
+            threading.Timer(0.5, _restart).start()
+            return
         if p.path == "/update/apply":
             if not UPDATE_REPO:
                 self._json({"error": "repository non configurato"}, 400)
@@ -450,10 +465,14 @@ def is_free(port):
 
 
 def pick_port():
-    if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        p = int(sys.argv[1])
-        if is_free(p):
-            return p
+    wanted = next((a for a in sys.argv[1:] if a.isdigit()), None)
+    if wanted:
+        p = int(wanted)
+        # dopo un riavvio la vecchia porta può restare occupata un istante
+        for _ in range(20):
+            if is_free(p):
+                return p
+            time.sleep(0.1)
         print("  La porta %d è occupata, ne cerco un'altra…" % p)
     for p in PORT_CANDIDATES:
         if p == 0 or is_free(p):
@@ -462,8 +481,10 @@ def pick_port():
 
 
 def main():
+    global CURRENT_PORT
     server = ThreadingHTTPServer(("127.0.0.1", pick_port()), Handler)
     port = server.server_address[1]
+    CURRENT_PORT = port
     url = "http://localhost:%d" % port
     print("\n  MakReader avviato!  Apri:  %s\n  (premi Ctrl+C per fermare)\n" % url, flush=True)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()

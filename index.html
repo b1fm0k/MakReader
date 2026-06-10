@@ -299,7 +299,9 @@ function renderSources(){
 async function applyUpd(){
   const m=$("#updMsg");m.textContent="Scarico l'aggiornamento…";
   try{const r=await fetch("/update/apply",{method:"POST"});const d=await r.json();if(d.error)throw new Error(d.error);
-    m.innerHTML="✓ Aggiornato. Chiudi e riavvia MakReader per applicare le modifiche.";
+    m.innerHTML="✓ Scaricato. Riavvio MakReader…";
+    try{await fetch("/restart",{method:"POST"});}catch(e){}
+    setTimeout(()=>location.reload(),2800);
   }catch(e){m.textContent="Aggiornamento fallito: "+esc(e.message||String(e));}
 }
 async function move(id,d){const o=DB.sources.order,i=o.indexOf(id),j=i+d;if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];await saveSources();renderSources();}

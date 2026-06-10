@@ -1,4 +1,4 @@
 {
-  "version": "1.0.3",
-  "notes": "Ricerca anche per autore.\nConsigli di manga tra amici (sezione Suggerimenti).\nLibreria riordinata e correzioni varie.\nUsa solo numeri nella versione (es. 1.0.4), niente lettere."
+  "version": "1.0.4",
+  "notes": "Riavvio automatico dopo l'aggiornamento: non serve più chiudere e riaprire a mano.\nRicerca anche per autore.\nConsigli di manga tra amici (sezione Suggerimenti).\nLibreria riordinata e correzioni varie.\nUsa solo numeri nella versione (es. 1.0.5), niente lettere."
 }
