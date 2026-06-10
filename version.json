@@ -1,4 +1,4 @@
 {
-  "version": "1.0.5",
-  "notes": "Riavvio automatico dopo l'aggiornamento: non serve più chiudere e riaprire a mano.\nRicerca anche per autore.\nConsigli di manga tra amici (sezione Suggerimenti).\nImport MyAnimeList più sicuro e libreria riordinata.\nUsa solo numeri nella versione (es. 1.0.6), niente lettere."
+  "version": "1.0.6",
+  "notes": "I manga in stato \"Dropped\" non mostrano più i capitoli non letti (niente badge, conteggio Novità o notifiche).\nRiavvio automatico dopo l'aggiornamento.\nRicerca anche per autore.\nConsigli di manga tra amici (sezione Suggerimenti).\nUsa solo numeri nella versione (es. 1.0.7), niente lettere."
 }

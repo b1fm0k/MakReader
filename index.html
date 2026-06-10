@@ -390,6 +390,8 @@ async function multiSearch(q,en){
 
 // ---------- detail ----------
 const CATS=["Reading","Plan to Read","Completed","On-Hold","Dropped"];
+// per i manga abbandonati ("Dropped") non ha senso evidenziare i capitoli non letti
+function effUnread(f){return (f&&f.category==="Dropped")?0:((f&&f.unread)||0);}
 async function openDetail(src,id,known){
   const _at=document.querySelector(".tab.active");if(_at)detailBack=_at.dataset.tab;
   curDetail={src,id};
@@ -702,7 +704,7 @@ function renderLibrary(){
   let arr=ids.map(k=>({k,o:DB.follows[k],p:DB.progress[k]||{}}));
   if(q)arr=arr.filter(x=>(x.o.title||"").toLowerCase().includes(q));
   const sortFn=(a,b)=>libSort==="alpha"?(a.o.title||"").localeCompare(b.o.title||"")
-    :libSort==="unread"?((b.o.unread||0)-(a.o.unread||0))
+    :libSort==="unread"?(effUnread(b.o)-effUnread(a.o))
     :libSort==="updated"?((parseFloat(b.o.latestNum)||0)-(parseFloat(a.o.latestNum)||0))
     :((b.p.lastReadAt||0)-(a.p.lastReadAt||0));
   if(libGroup){
@@ -713,14 +715,14 @@ function renderLibrary(){
     gk.forEach(c=>{const list=groups[c].slice().sort(sortFn);
       html+='<h3 class="sec">'+esc(c)+' ('+list.length+')</h3><div class="grid'+dens+'" style="margin-bottom:22px">'+list.map(x=>cardMini(x.o,{rm:true})).join("")+'</div>';});
   }else{
-    const newCount=ids.filter(k=>(DB.follows[k].unread||0)>0).length;
+    const newCount=ids.filter(k=>effUnread(DB.follows[k])>0).length;
     const cats=[...new Set(ids.map(k=>DB.follows[k].category||""))];
     let chips='<span class="chip '+(libFilter==="__all__"?"on":"")+'" data-cat="__all__">Tutti</span>';
     if(newCount)chips+='<span class="chip '+(libFilter==="__new__"?"on":"")+'" data-cat="__new__">Novità ('+newCount+')</span>';
     chips+=cats.map(c=>'<span class="chip '+(libFilter===c?"on":"")+'" data-cat="'+esc(c)+'">'+(c||"Senza stato")+'</span>').join("");
     html+='<div class="chips">'+chips+'</div>';
     let farr=arr.slice();
-    if(libFilter==="__new__")farr=farr.filter(x=>(x.o.unread||0)>0);
+    if(libFilter==="__new__")farr=farr.filter(x=>effUnread(x.o)>0);
     else if(libFilter!=="__all__")farr=farr.filter(x=>(x.o.category||"")===libFilter);
     farr.sort(sortFn);
     html+='<div class="grid'+dens+'">'+(farr.length?farr.map(x=>cardMini(x.o,{rm:true})).join(""):'<div class="empty">Nessun risultato.</div>')+'</div>';
@@ -775,7 +777,7 @@ async function bulkDownload(keys){
 }
 function cardMini(o,opts){
   opts=opts||{};
-  const un=o.unread||0;
+  const un=effUnread(o);
   const p=DB.progress[key(o.source,o.id)]||{};
   const read=p.lastChapterNum,avail=o.latestNum;
   let sline="";
@@ -804,13 +806,13 @@ async function renderUpdates(){
       const latest=d.chapters[d.chapters.length-1];
       f.latestNum=latest.number;
       const idx=f.lastChapterId?d.chapters.findIndex(c=>c.id===f.lastChapterId):-1;
-      const unread=idx>=0?(d.chapters.length-1-idx):(f.lastChapterId?d.chapters.length:0);
+      const unread=(f.category==="Dropped")?0:(idx>=0?(d.chapters.length-1-idx):(f.lastChapterId?d.chapters.length:0));
       f.unread=unread;
       if(unread>0)upd.push({k,f,latest,unread});
     }catch(e){}
   }
   await saveDB();
-  setBadge(Object.values(DB.follows).filter(f=>f.unread>0).length);
+  setBadge(Object.values(DB.follows).filter(f=>effUnread(f)>0).length);
   if(!upd.length){v.innerHTML='<h3 class="sec">Aggiornamenti</h3><div class="empty">Sei aggiornato! ✓</div>';return;}
   upd.sort((a,b)=>b.unread-a.unread);
   v.innerHTML='<h3 class="sec">Nuovi capitoli</h3><div class="grid">'+upd.map(u=>{
@@ -925,7 +927,7 @@ async function autoCheck(notify){
           f.latestNum=d.number;
           const lr=parseFloat((DB.progress[k]&&DB.progress[k].lastChapterNum)||"")||0;
           const lt=parseFloat(d.number)||0;
-          const unread=(lr>0)?Math.max(0,Math.round(lt-lr)):0;
+          const unread=(f.category==="Dropped")?0:((lr>0)?Math.max(0,Math.round(lt-lr)):0);
           f.unread=unread; if(unread>0)newCount++;
         }
       }catch(e){}
@@ -934,7 +936,7 @@ async function autoCheck(notify){
   // controllo in parallelo (fino a 6 sorgenti insieme) -> molto più veloce
   await Promise.all(Array.from({length:Math.min(LIMIT,keys.length)},worker));
   saveDB();
-  const tot=Object.values(DB.follows).reduce((a,f)=>a+(f.unread>0?1:0),0);
+  const tot=Object.values(DB.follows).reduce((a,f)=>a+(effUnread(f)>0?1:0),0);
   setBadge(tot);
   if(document.querySelector(".tab.active")&&document.querySelector(".tab.active").dataset.tab==="library")renderLibrary();
   if(notify&&newCount&&SET.notify&&window.Notification&&Notification.permission==="granted"){
