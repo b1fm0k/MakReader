@@ -15,10 +15,11 @@ import threading
 import webbrowser
 import importlib.util
 import xml.etree.ElementTree as ET
+import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.5"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -66,17 +67,45 @@ sources = _load_mod("sources")
 downloads = _load_mod("downloads")
 
 
+def _safe_xml_fromstring(raw):
+    """Parsa XML rifiutando DTD/entità a livello di parser (anti 'XML bomb').
+
+    Usa direttamente il motore expat con gli handler di DTD/ENTITY impostati a
+    sollevare un errore: appena incontra un <!DOCTYPE> o una dichiarazione
+    <!ENTITY> interrompe, così l'espansione di entità ricorsive (billion laughs)
+    è impossibile per costruzione. Costruisce un albero ElementTree standard.
+    """
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+
+    def _forbid(*_a, **_k):
+        raise ValueError("File XML non ammesso (contiene DOCTYPE/ENTITY).")
+
+    builder = ET.TreeBuilder()
+    p = expat.ParserCreate()
+    p.StartDoctypeDeclHandler = _forbid
+    p.EntityDeclHandler = _forbid
+    p.UnparsedEntityDeclHandler = _forbid
+    p.ExternalEntityRefHandler = lambda *a, **k: False
+    p.StartElementHandler = lambda name, attrs: builder.start(name, attrs)
+    p.EndElementHandler = lambda name: builder.end(name)
+    p.CharacterDataHandler = lambda data: builder.data(data)
+    p.Parse(raw, True)
+    return builder.close()
+
+
 def parse_mal(raw):
     """Legge un export MyAnimeList (XML o XML gzippato) e restituisce le voci manga."""
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     if len(raw) > 30 * 1024 * 1024:
         raise ValueError("File troppo grande.")
-    # sicurezza: rifiuta XML con DOCTYPE/ENTITY (vettore della 'XML bomb')
+    # sicurezza: rifiuta XML con DOCTYPE/ENTITY (vettore della 'XML bomb').
+    # Doppia difesa: controllo sui byte + parser che rifiuta DTD/entità.
     head = raw[:8192].lower()
     if b"<!doctype" in head or b"<!entity" in head:
         raise ValueError("File XML non ammesso (contiene DOCTYPE/ENTITY).")
-    root = ET.fromstring(raw)
+    root = _safe_xml_fromstring(raw)
     entries = []
     for m in root.findall("manga"):
         title = (m.findtext("manga_title") or m.findtext("series_title") or "").strip()
