@@ -14,12 +14,13 @@ import socket
 import threading
 import webbrowser
 import importlib.util
+import concurrent.futures
 import xml.etree.ElementTree as ET
 import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -360,8 +361,15 @@ class Handler(BaseHTTPRequestHandler):
                 cur = local_version()
                 lat = str(remote.get("version", "?"))
                 newer = version_tuple(lat) > version_tuple(cur)
+                # "binaryVersion" = ultima versione che richiede un binario nuovo
+                # (cioè in cui è cambiato mangareader.py, che NON si auto-aggiorna).
+                # Se è più recente del binario installato, serve riscaricare l'app.
+                binver = str(remote.get("binaryVersion", "0"))
+                needs_binary = version_tuple(binver) > version_tuple(APP_VERSION)
                 self._json({"configured": True, "current": cur, "latest": lat,
-                            "update": newer, "notes": remote.get("notes", "")})
+                            "update": newer, "needsBinary": needs_binary,
+                            "appVersion": APP_VERSION, "notes": remote.get("notes", ""),
+                            "releasesUrl": "https://github.com/%s/releases/latest" % UPDATE_REPO})
             except Exception as e:
                 self._json({"configured": True, "current": local_version(), "error": str(e)}, 502)
             return
@@ -432,6 +440,42 @@ class Handler(BaseHTTPRequestHandler):
                 d["sources"] = json.loads(raw)
                 save_data(d)
                 self._json({"ok": True})
+            except Exception as e:
+                self._json({"error": str(e)}, 400)
+            return
+        if p.path == "/check":
+            # Controllo aggiornamenti in blocco: una sola richiesta dal browser,
+            # il motore verifica i manga in parallelo (con un tetto per sorgente,
+            # per non farsi bloccare). Molto più veloce di 1 richiesta per manga.
+            try:
+                body = json.loads(raw)
+                items = body.get("items", []) if isinstance(body, dict) else \
+                    (body if isinstance(body, list) else [])
+                sems, sem_lock = {}, threading.Lock()
+
+                def _sem(src):
+                    with sem_lock:
+                        s = sems.get(src)
+                        if s is None:
+                            s = sems[src] = threading.Semaphore(8)  # max 8 insieme per sorgente
+                        return s
+
+                def _one(it):
+                    key = it.get("key")
+                    src = sources.REGISTRY.get(it.get("source"))
+                    if not src:
+                        return key, None
+                    with _sem(it.get("source")):
+                        try:
+                            return key, src.latest(it.get("id"))
+                        except Exception:
+                            return key, None  # errore: lato client si lascia invariato
+                results = {}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
+                    for k, n in ex.map(_one, items):
+                        if k is not None:
+                            results[k] = n
+                self._json({"results": results})
             except Exception as e:
                 self._json({"error": str(e)}, 400)
             return

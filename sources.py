@@ -313,12 +313,18 @@ class _FMcDN(Source):
         # Restringi alla lista capitoli reale (esclude "ultime uscite" della sidebar)
         sc = re.search(r'<ul class="detail-main-list[^"]*">(.*?)</ul>', page, re.S)
         scope = sc.group(1) if sc else page
+        # slug del manga corrente: accetta SOLO capitoli di questa serie
+        # (evita capitoli di altri manga che compaiono nella pagina)
+        ms = re.search(r"/manga/([^/]+)", manga_id)
+        slug = ms.group(1) if ms else ""
         seen, chapters = set(), []
         for m in re.finditer(r'href="((?:https?://[^"]*?)?/manga/[^"]+?/(?:v\d+/)?c[\d.]+/1\.html)"[^>]*title="([^"]+)"',
                              scope):
             curl = _abs(m.group(1), self.base)
             if curl in seen:
                 continue
+            if slug and ("/manga/" + slug + "/") not in curl:
+                continue  # capitolo di un altro manga: scarta
             seen.add(curl)
             name = _clean(m.group(2))
             nm = re.search(r"/c([\d.]+)/", curl)
@@ -346,8 +352,13 @@ class _FMcDN(Source):
         page = self._get(manga_id, referer=self.base + "/")
         sc = re.search(r'<ul class="detail-main-list[^"]*">(.*?)</ul>', page, re.S)
         scope = sc.group(1) if sc else page
+        # conta SOLO i capitoli di questo manga (non di altri presenti nella pagina)
+        ms = re.search(r"/manga/([^/]+)", manga_id)
+        slug = ms.group(1) if ms else ""
+        pat = (r"/manga/" + re.escape(slug) + r"/(?:v\d+/)?c([\d.]+)/1\.html") if slug \
+            else r"/c([\d.]+)/1\.html"
         best, best_f = "", -1.0
-        for n in re.findall(r"/c([\d.]+)/1\.html", scope):
+        for n in re.findall(pat, scope):
             try:
                 fv = float(n)
             except ValueError:

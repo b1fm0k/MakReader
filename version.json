@@ -1,4 +1,5 @@
 {
-  "version": "1.1.0",
-  "notes": "Nuova sorgente italiana finalmente funzionante: MangaWorld (ricerca, scheda, lettura).\nWeebCentral: risolto il \"?\" sul numero dei capitoli.\nRiavvio automatico dopo l'aggiornamento: non serve più chiudere e riaprire a mano.\nI manga \"Dropped\" non mostrano più i capitoli non letti.\nImport da MyAnimeList più sicuro.\nRicerca anche per autore e sezione Suggerimenti tra amici.\nVarie correzioni e migliorie di stabilità."
+  "version": "1.1.1",
+  "binaryVersion": "1.1.1",
+  "notes": "Nuova sorgente italiana finalmente funzionante: MangaWorld (ricerca, scheda, lettura).\nWeebCentral: risolto il \"?\" sul numero dei capitoli.\nControllo aggiornamenti molto più veloce.\nL'app ora avvisa quando un aggiornamento richiede di riscaricare il programma (con backup della libreria).\nRiavvio automatico dopo l'aggiornamento.\nI manga \"Dropped\" non mostrano più i capitoli non letti.\nMangaFox: niente più capitoli di altri manga in coda.\nImport da MyAnimeList più sicuro.\nVarie correzioni e migliorie di stabilità."
 }

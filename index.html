@@ -291,7 +291,22 @@ function renderSources(){
     const m=$("#updMsg");m.textContent="Controllo…";
     try{const d=await jget("/update/check");
       if(!d.configured){m.textContent="Aggiornamenti non ancora configurati (vedi la guida GitHub).";return;}
-      if(d.update){m.innerHTML='Nuova versione <b>'+esc(d.latest)+'</b> disponibile.'+(d.notes?'<div class="sub" style="margin:6px 0">Novità: '+esc(d.notes).replace(/\n/g,"<br>")+'</div>':'')+'<button class="btn" id="doUpd" style="padding:5px 11px;margin-top:6px">Aggiorna ora</button>';$("#doUpd").onclick=applyUpd;}
+      if(d.update){
+        const novita=d.notes?'<div class="sub" style="margin:6px 0">Novità: '+esc(d.notes).replace(/\n/g,"<br>")+'</div>':'';
+        if(d.needsBinary){
+          // questa versione richiede un binario nuovo: l'aggiornamento in-app non basta
+          const url=d.releasesUrl||"#";
+          m.innerHTML='Nuova versione <b>'+esc(d.latest)+'</b> disponibile.'+novita+
+            '<div class="sub" style="margin-top:6px">⚠ Questa versione richiede di <b>riscaricare l\'app</b> (l\'aggiornamento rapido non basta). La tua libreria resta salva, ma puoi farne un backup per sicurezza.</div>'+
+            '<div style="margin-top:6px"><button class="btn sec" id="doBackup" style="padding:5px 11px;margin-right:6px">⤓ Salva backup libreria</button>'+
+            '<a class="btn" href="'+esc(url)+'" target="_blank" rel="noopener" style="padding:5px 11px;display:inline-block">Scarica l\'app aggiornata</a></div>';
+          $("#doBackup").onclick=exportLibrary;
+        }else{
+          m.innerHTML='Nuova versione <b>'+esc(d.latest)+'</b> disponibile.'+novita+
+            '<button class="btn" id="doUpd" style="padding:5px 11px;margin-top:6px">Aggiorna ora</button>';
+          $("#doUpd").onclick=applyUpd;
+        }
+      }
       else m.textContent="Sei aggiornato (versione "+esc(d.current)+").";
     }catch(e){m.textContent="Errore nel controllo: "+esc(e.message||String(e));}
   };
@@ -405,7 +420,18 @@ async function openDetail(src,id,known){
   const k=key(src,id),f=DB.follows[k],followed=!!f;
   const cover=d.cover||(known&&known.cover)||"";
   const refHost=srcRef(src);
-  if(f&&d.title&&(!f.title||!f.cover)){f.title=f.title||d.title;f.cover=f.cover||cover;saveDB();}
+  if(f){
+    let ch=false;
+    if(d.title&&!f.title){f.title=d.title;ch=true;}
+    if(cover&&!f.cover){f.cover=cover;ch=true;}
+    // aggiorna il numero dell'ultimo capitolo dai dati appena scaricati
+    if(d.chapters&&d.chapters.length){
+      const nums=d.chapters.map(c=>parseFloat(c.number)).filter(n=>!isNaN(n));
+      const mx=nums.length?String(Math.max(...nums)):"";
+      if(mx&&f.latestNum!==mx){f.latestNum=mx;ch=true;}
+    }
+    if(ch)saveDB();
+  }
   const prog=DB.progress[k];
   const resumeIdx=prog&&prog.lastChapterId?d.chapters.findIndex(c=>c.id===prog.lastChapterId):-1;
   const resumeBtn=resumeIdx>=0?('<button class="btn" id="resumeBtn">▶ Riprendi'+(prog.lastChapterNum?(' (Cap. '+esc(prog.lastChapterNum)+')'):'')+'</button>'):'';
@@ -918,24 +944,25 @@ function openDownloadsModal(){
 function saveSettings(){fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
 async function autoCheck(notify){
   let newCount=0;
-  const keys=Object.keys(DB.follows), LIMIT=6;
-  let i=0;
-  async function worker(){
-    while(i<keys.length){
-      const k=keys[i++], f=DB.follows[k];
-      try{const d=await jget(`/latest?source=${encodeURIComponent(f.source)}&url=${encodeURIComponent(f.id)}`);
-        if(d.number){
-          f.latestNum=d.number;
-          const lr=parseFloat((DB.progress[k]&&DB.progress[k].lastChapterNum)||"")||0;
-          const lt=parseFloat(d.number)||0;
-          const unread=(f.category==="Dropped")?0:((lr>0)?Math.max(0,Math.round(lt-lr)):0);
-          f.unread=unread; if(unread>0)newCount++;
-        }
-      }catch(e){}
-    }
+  // UNA sola richiesta: il motore controlla tutti i manga in parallelo lato server
+  // (niente più 1 richiesta per manga, che il browser strozzava a 6 per volta).
+  const items=Object.keys(DB.follows).map(k=>({key:k,source:DB.follows[k].source,id:DB.follows[k].id}));
+  let res={};
+  try{
+    const r=await fetch("/check",{method:"POST",headers:{"Content-Type":"application/json"},
+                                  body:JSON.stringify({items})});
+    res=(await r.json()).results||{};
+  }catch(e){}
+  for(const k in res){
+    const num=res[k];
+    if(num===null||num===undefined||num==="")continue;  // errore o vuoto: lascia com'è
+    const f=DB.follows[k]; if(!f)continue;
+    f.latestNum=String(num);
+    const lr=parseFloat((DB.progress[k]&&DB.progress[k].lastChapterNum)||"")||0;
+    const lt=parseFloat(num)||0;
+    const unread=(f.category==="Dropped")?0:((lr>0)?Math.max(0,Math.round(lt-lr)):0);
+    f.unread=unread; if(unread>0)newCount++;
   }
-  // controllo in parallelo (fino a 6 sorgenti insieme) -> molto più veloce
-  await Promise.all(Array.from({length:Math.min(LIMIT,keys.length)},worker));
   saveDB();
   const tot=Object.values(DB.follows).reduce((a,f)=>a+(effUnread(f)>0?1:0),0);
   setBadge(tot);
