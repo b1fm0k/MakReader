@@ -643,8 +643,132 @@ class MangaWorld(Source):
         return {"pages": [_abs(p, self.base) for p in pages], "referer": self.base + "/"}
 
 
+# ============================================================
+#  Comick (API JSON ufficiale) - libreria ampia, multilingua
+# ============================================================
+class Comick(Source):
+    id = "comick"
+    name = "Comick"
+    base = "https://comick.io"
+    # l'API cambia dominio ogni tanto: si provano in ordine e si ricorda quello buono
+    API_HOSTS = ["https://api.comick.dev", "https://api.comick.io", "https://api.comick.fun"]
+    imgcdn = "https://meo.comick.pictures"
+    lang = "en"
+    chlabel = "Chapter"
+    note = "API JSON, libreria ampia. Immagini non mescolate."
+
+    _STATUS = {1: "Ongoing", 2: "Completed", 3: "Cancelled", 4: "Hiatus"}
+    _api = None  # host API funzionante (cache condivisa)
+
+    def _get(self, path):
+        hosts = ([Comick._api] if Comick._api else []) + \
+                [h for h in self.API_HOSTS if h != Comick._api]
+        last = None
+        for h in hosts:
+            try:
+                data = http_get(h + path)
+                Comick._api = h
+                return json.loads(data)
+            except urllib.error.URLError as e:
+                last = e  # DNS/connessione: prova il prossimo dominio
+                continue
+        raise last if last else RuntimeError("Comick non raggiungibile")
+
+    def _cover(self, md_covers):
+        if md_covers:
+            b = (md_covers[0] or {}).get("b2key")
+            if b:
+                return self.imgcdn + "/" + b
+        return ""
+
+    def search(self, query, by="title"):
+        if by == "author":
+            return []  # ricerca per autore non supportata da questo endpoint
+        data = self._get("/v1.0/search?type=comic&limit=20&q=" + urllib.parse.quote(query))
+        items = data if isinstance(data, list) else (data.get("data") or [])
+        out, seen = [], set()
+        for it in items:
+            slug = it.get("slug") or it.get("hid")
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            out.append({"id": slug, "title": _clean(it.get("title") or ""),
+                        "cover": self._cover(it.get("md_covers")), "status": ""})
+        return out
+
+    def _comic(self, manga_id):
+        return self._get("/comic/" + urllib.parse.quote(manga_id) + "?tachiyomi=true")
+
+    def _chapters(self, hid):
+        chapters, seen, page = [], set(), 1
+        while True:
+            cd = self._get("/comic/%s/chapters?lang=%s&limit=100&page=%d&chap-order=1"
+                           % (hid, self.lang, page))
+            chs = cd.get("chapters") or []
+            if not chs:
+                break
+            for c in chs:
+                chap = c.get("chap")
+                if chap is None or chap in seen or not c.get("hid"):
+                    continue
+                seen.add(chap)
+                nm = self.chlabel + " " + str(chap)
+                if c.get("title"):
+                    nm += " - " + c["title"]
+                chapters.append({"id": c["hid"], "name": nm, "number": str(chap)})
+            if len(chs) < 100:
+                break
+            page += 1
+
+        def _n(c):
+            try:
+                return (0, float(c["number"]))
+            except (ValueError, TypeError):
+                return (1, 0.0)
+        chapters.sort(key=_n)
+        return chapters
+
+    def details(self, manga_id):
+        d = self._comic(manga_id)
+        comic = d.get("comic") or {}
+        hid = comic.get("hid")
+        genres = []
+        for g in comic.get("md_comic_md_genres", []):
+            n = (g.get("md_genres") or {}).get("name")
+            if n:
+                genres.append(n)
+        authors = [a.get("name") for a in d.get("authors", []) if a.get("name")]
+        alts = [t.get("title") for t in comic.get("md_titles", []) if t.get("title")]
+        desc = _clean(re.sub(r"<[^>]+>", " ", comic.get("desc") or ""))
+        return {"title": _clean(comic.get("title") or ""), "cover": self._cover(comic.get("md_covers")),
+                "description": desc, "chapters": self._chapters(hid) if hid else [],
+                "author": ", ".join(dict.fromkeys(authors)), "status": self._STATUS.get(comic.get("status"), ""),
+                "year": str(comic.get("year") or "") if comic.get("year") else "",
+                "genres": genres[:12], "altTitles": alts[:6]}
+
+    def latest(self, manga_id):
+        comic = (self._comic(manga_id).get("comic") or {})
+        lc = comic.get("last_chapter")
+        return str(lc) if lc not in (None, "") else ""
+
+    def pages(self, chapter_id):
+        d = self._get("/chapter/" + urllib.parse.quote(chapter_id) + "?tachiyomi=true")
+        ch = d.get("chapter") or {}
+        pages = [self.imgcdn + "/" + im["b2key"] for im in ch.get("md_images", []) if im.get("b2key")]
+        return {"pages": pages, "referer": "https://comick.io/"}
+
+
+class ComickIT(Comick):
+    id = "comick-it"
+    name = "Comick (Italiano)"
+    lang = "it"
+    chlabel = "Cap."
+    note = "Comick, capitoli in italiano (dove disponibili)."
+
+
 # ---- registry ----
-_ALL = [WeebCentral(), MangaFox(), MangaHere(), MangaDex(), MangaDexIT(), MangaWorld()]
+_ALL = [WeebCentral(), MangaFox(), MangaHere(), MangaDex(), MangaDexIT(), MangaWorld(),
+        Comick(), ComickIT()]
 REGISTRY = {s.id: s for s in _ALL}
 DEFAULT_ORDER = [s.id for s in _ALL]
 
