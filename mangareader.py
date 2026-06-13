@@ -20,7 +20,7 @@ import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -128,6 +128,31 @@ def parse_mal(raw):
         })
     return entries
 
+def mal_genres(d):
+    """Lista di generi MAL (generi + temi + demografica) da una voce Jikan."""
+    out = []
+    for key in ("genres", "themes", "demographics"):
+        for x in d.get(key, []):
+            n = x.get("name")
+            if n and n not in out:
+                out.append(n)
+    return out
+
+
+def mal_fetch(mid, title):
+    """Risolve una voce MAL per ID (se c'è) o per titolo. Ritorna i dati Jikan o None."""
+    mid = str(mid or "").strip()
+    if mid:
+        return json.loads(sources.http_get(
+            "https://api.jikan.moe/v4/manga/" + urllib.parse.quote(mid))).get("data")
+    title = str(title or "").strip()
+    if not title:
+        return None
+    arr = json.loads(sources.http_get(
+        "https://api.jikan.moe/v4/manga?limit=1&q=" + urllib.parse.quote(title))).get("data") or []
+    return arr[0] if arr else None
+
+
 def normalize_mal(d):
     """Estrae i campi utili dalla risposta Jikan (MyAnimeList)."""
     def names(key):
@@ -148,6 +173,7 @@ def normalize_mal(d):
         "japanese": d.get("title_japanese") or "",
         "synonyms": d.get("title_synonyms") or [],
         "synopsis": d.get("synopsis") or "",
+        "genres": mal_genres(d),
         "info": info,
     }
 
@@ -337,13 +363,7 @@ class Handler(BaseHTTPRequestHandler):
             mid = q.get("id", [""])[0]
             title = q.get("title", [""])[0]
             try:
-                if mid:
-                    data = json.loads(sources.http_get(
-                        "https://api.jikan.moe/v4/manga/" + urllib.parse.quote(mid))).get("data")
-                else:
-                    arr = json.loads(sources.http_get(
-                        "https://api.jikan.moe/v4/manga?limit=1&q=" + urllib.parse.quote(title))).get("data") or []
-                    data = arr[0] if arr else None
+                data = mal_fetch(mid, title)
                 if not data:
                     self._json({"found": False})
                 else:
@@ -491,6 +511,31 @@ class Handler(BaseHTTPRequestHandler):
                 items = body if isinstance(body, list) else [body]
                 ids = [DL.enqueue(it) for it in items]
                 self._json({"ok": True, "ids": ids})
+            except Exception as e:
+                self._json({"error": str(e)}, 400)
+            return
+        if p.path == "/mal/scan":
+            # scarica i generi da MAL per un blocco di manga (uno per volta, con
+            # una pausa: MAL/Jikan limita le richieste). Restituisce {key: [generi]}.
+            try:
+                body = json.loads(raw)
+                items = body.get("items", []) if isinstance(body, dict) else []
+                results = {}
+                for it in items:
+                    key = it.get("key")
+                    mid = str(it.get("malId") or "").strip()
+                    title = str(it.get("title") or "").strip()
+                    if not key or (not mid and not title):
+                        continue
+                    try:
+                        data = mal_fetch(mid, title)
+                        if data:
+                            results[key] = {"malId": str(data.get("mal_id") or ""),
+                                            "genres": mal_genres(data)}
+                    except Exception:
+                        pass  # singolo errore: si salta, il client riproverà semmai
+                    time.sleep(0.6)  # rispetta il limite di richieste di MAL/Jikan
+                self._json({"results": results})
             except Exception as e:
                 self._json({"error": str(e)}, 400)
             return

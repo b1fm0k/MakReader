@@ -216,10 +216,12 @@ let libSort=localStorage.getItem("libSort")||"recent";
 let libGroup=localStorage.getItem("libGroup")==="1";
 let libDensity=localStorage.getItem("libDensity")||"normal";
 let libQuery="";
+let libGenres=JSON.parse(localStorage.getItem("libGenres")||"[]");  // generi MAL selezionati (logica AND)
+let genreOpen=false, genreQuery="";  // stato tendina generi (apertura + ricerca interna)
 let libSelect=false, selSet=new Set(), dlCount={};
 let chapView=localStorage.getItem("chapView")||"grid";
 let curDetail=null, detailBack="library";
-function persistLib(){localStorage.setItem("libFilter",libFilter);localStorage.setItem("libSort",libSort);localStorage.setItem("libGroup",libGroup?"1":"0");localStorage.setItem("libDensity",libDensity);}
+function persistLib(){localStorage.setItem("libFilter",libFilter);localStorage.setItem("libSort",libSort);localStorage.setItem("libGroup",libGroup?"1":"0");localStorage.setItem("libDensity",libDensity);localStorage.setItem("libGenres",JSON.stringify(libGenres));}
 let reader={chapters:[],idx:0,pages:[],page:0,paged:false,key:null,source:null,title:"",cover:"",ref:""};
 
 const key=(src,id)=>src+"||"+id;
@@ -438,7 +440,10 @@ async function openDetail(src,id,known){
   const crossBtn=enabledSources().filter(s=>s!==src).length?('<button class="btn sec" id="crossBtn">🔎 Altre sorgenti</button>'):'';
   const malUrl=(f&&f.malId)?('https://myanimelist.net/manga/'+encodeURIComponent(f.malId)):('https://myanimelist.net/manga.php?cat=manga&q='+encodeURIComponent(d.title||(known&&known.title)||""));
   const metaBits=[d.status,d.year,d.author].filter(Boolean).map(esc).join(" · ");
-  const genresHtml=(d.genres&&d.genres.length)?('<div class="tagrow">'+d.genres.map(g=>'<span class="tag">'+esc(g)+'</span>').join("")+'</div>'):'';
+  // generi: preferisci quelli di MAL (se il manga è già arricchito); altrimenti
+  // quelli della sorgente come ripiego. La riga si aggiorna quando carichi "Info da MAL".
+  const showGenres=(f&&f.genres&&f.genres.length)?f.genres:(d.genres||[]);
+  const genresHtml='<div class="tagrow" id="genreRow">'+showGenres.map(g=>'<span class="tag">'+esc(g)+'</span>').join("")+'</div>';
   const heroBg=cover?('<div class="bg" style="background-image:url(\''+img(cover,refHost)+'\')"></div>'):'';
   const altHtml=(d.altTitles&&d.altTitles.length)?('<div class="alttitles">'+esc(d.altTitles.slice(0,5).join("  ·  "))+'</div>'):'';
   const descText=(esc(d.description||"").replace(/\n/g,"<br>"))||'<span style="color:var(--muted)">Nessuna trama disponibile da questa sorgente.</span>';
@@ -528,7 +533,7 @@ async function openDetail(src,id,known){
   const shb=$("#shareBtn");if(shb)shb.onclick=()=>openShareModal([{source:src,id,title:d.title||(known&&known.title)||"",cover:cover}]);
   $("#backBtn").onclick=()=>showTab(detailBack||"library");
   const malBox=$("#malBox");
-  if(malBox)malBox.addEventListener("toggle",()=>{if(malBox.open&&!malBox.dataset.loaded){malBox.dataset.loaded="1";loadMal(f&&f.malId,d.title||(known&&known.title)||"");}});
+  if(malBox)malBox.addEventListener("toggle",()=>{if(malBox.open&&!malBox.dataset.loaded){malBox.dataset.loaded="1";loadMal(f&&f.malId,d.title||(known&&known.title)||"",k);}});
 }
 // cerca lo stesso titolo sulle altre sorgenti attive
 let csList=[];
@@ -673,14 +678,49 @@ function malContentHtml(m){
   if(m.url)h+='<div style="margin-top:12px"><a href="'+esc(m.url)+'" target="_blank" class="btn sec" style="padding:6px 12px;display:inline-block">Apri su MyAnimeList ↗</a></div>';
   return h||'<div class="malrow">Nessun dettaglio disponibile.</div>';
 }
-async function loadMal(id,title){
+async function loadMal(id,title,k){
   const c=$("#malContent");if(!c)return;
   c.innerHTML='<div class="loading"><div class="spin"></div></div>';
   try{
     const u=id?("/mal?id="+encodeURIComponent(id)):("/mal?title="+encodeURIComponent(title));
     const d=await jget(u);
     c.innerHTML=d.found?malContentHtml(d.mal):'<div class="malrow">Nessun dato trovato su MyAnimeList per questo titolo.</div>';
+    // arricchimento passivo: salva ID + generi MAL sul manga in libreria (una volta)
+    if(d.found&&d.mal&&k&&DB.follows[k]){
+      const f=DB.follows[k];let ch=false;
+      if(d.mal.mal_id&&!f.malId){f.malId=String(d.mal.mal_id);ch=true;}
+      if(d.mal.genres&&f.genres===undefined){f.genres=d.mal.genres;ch=true;}
+      if(ch)saveDB();
+      // aggiorna dal vivo la riga generi della scheda con quelli di MAL
+      if(f.genres&&f.genres.length){const gr=$("#genreRow");if(gr)gr.innerHTML=f.genres.map(g=>'<span class="tag">'+esc(g)+'</span>').join("");}
+    }
   }catch(e){c.innerHTML='<div class="malrow">Errore nel recupero da MAL: '+esc(e.message)+'</div>';}
+  // correzione manuale dell'abbinamento (per i manga in libreria)
+  if(k&&DB.follows[k]){
+    const fb=document.createElement("div");fb.style.marginTop="10px";
+    fb.innerHTML='<button class="btn sec" id="malFix" style="padding:5px 11px">Non è questo manga? Correggi</button>';
+    c.appendChild(fb);
+    const mf=$("#malFix");if(mf)mf.onclick=()=>fixMal(k,title);
+  }
+}
+async function fixMal(k,title){
+  const inp=prompt("Incolla il link alla pagina MANGA di MyAnimeList (…/manga/NUMERO/…) oppure il solo numero ID:","");
+  if(inp===null)return;
+  const s=String(inp).trim();if(!s)return;
+  if(/myanimelist\.net\/anime\//i.test(s)){toast("È un link a un ANIME: serve il link alla pagina MANGA su MyAnimeList.");return;}
+  let id=null;
+  const m=s.match(/myanimelist\.net\/manga\/(\d+)/i);
+  if(m)id=m[1];
+  else if(/^\d{1,7}$/.test(s))id=s;  // solo un numero = ID del manga
+  if(!id){toast("Link non valido. Incolla l'indirizzo della pagina MANGA su MyAnimeList, o il solo numero ID.");return;}
+  // verifica che l'ID esista DAVVERO come manga, prima di salvarlo
+  let d=null;try{d=await jget("/mal?id="+encodeURIComponent(id));}catch(e){}
+  if(!d||!d.found){toast("Nessun manga trovato con quell'ID su MyAnimeList. Controlla che sia un link MANGA.");return;}
+  const f=DB.follows[k];if(!f)return;
+  f.malId=id;f.genres=undefined;   // azzero i generi: verranno ripresi dal nuovo ID
+  await saveDB();
+  await loadMal(id,title,k);       // ricarica il pannello col manga giusto e risalva
+  toast("Collegamento MAL aggiornato ✓");
 }
 async function resumeReading(src,id){
   const k=key(src,id),prog=DB.progress[k];
@@ -700,6 +740,7 @@ function renderLibrary(){
     (ids.length?`<button class="btn sec ${libGroup?'on':''}" id="groupBtn">▦ Categorie</button>`:'')+
     '<details class="moremenu"><summary class="btn sec">⋯ Altro</summary><div class="morepop">'+
       '<button class="btn sec" id="importMal">⬇ Importa da MyAnimeList</button>'+
+      '<button class="btn sec" id="genreScanMenu">🏷 Aggiorna generi (MAL)</button>'+
       '<button class="btn sec" id="backupBtn">⤓ Backup</button>'+
       '<button class="btn sec" id="restoreBtn">⤒ Ripristina</button>'+
       (ids.length?`<button class="btn sec" id="clearLib">🗑 Svuota (${ids.length})</button>`:'')+
@@ -711,9 +752,48 @@ function renderLibrary(){
   if(!ids.length){html+='<div class="empty">Libreria vuota. Usa <b>Cerca</b> per trovare un manga, o gestisci le fonti in <b>Sorgenti</b>.</div>';v.innerHTML=html;bindLib(v);return;}
   // conteggio capitoli scaricati per manga (indicatore offline)
   dlCount={};DLITEMS.forEach(i=>{if(i.status==="done")dlCount[i.manga_key]=(dlCount[i.manga_key]||0)+1;});
+  // filtro generi "a faccette": i generi disponibili (e i conteggi) si riferiscono
+  // ai manga che già passano ricerca + categoria + generi selezionati. Così
+  // selezionando un genere la lista si restringe a quelli ancora compatibili.
+  const fq=libQuery.trim().toLowerCase();
+  const matchesBase=(o)=>{
+    if(fq&&!(o.title||"").toLowerCase().includes(fq))return false;
+    if(libGenres.length){const g=o.genres||[];if(!libGenres.every(s=>g.includes(s)))return false;}
+    if(!libGroup&&libFilter!=="__all__"){
+      if(libFilter==="__new__"){if(!(effUnread(o)>0))return false;}
+      else if((o.category||"")!==libFilter)return false;
+    }
+    return true;
+  };
+  const genreCount={};
+  ids.forEach(k=>{const o=DB.follows[k];if(!matchesBase(o))return;(o.genres||[]).forEach(g=>{genreCount[g]=(genreCount[g]||0)+1;});});
+  libGenres.forEach(g=>{if(genreCount[g]===undefined)genreCount[g]=0;});  // tieni visibili i selezionati
+  const allGenres=Object.keys(genreCount).sort((a,b)=>a.localeCompare(b));
+  let genreCtrl;
+  if(allGenres.length){
+    const sel=libGenres.length?(' ('+libGenres.length+')'):'';
+    const gq=genreQuery.toLowerCase();
+    const rows=allGenres.map(g=>{
+      const disp=(gq&&!g.toLowerCase().includes(gq))?'none':'flex';
+      return '<label class="ck" style="display:'+disp+';gap:8px;align-items:center;padding:4px 2px;cursor:pointer">'+
+        '<input type="checkbox" class="genrebox" value="'+esc(g)+'" '+(libGenres.includes(g)?'checked':'')+'>'+
+        '<span>'+esc(g)+'</span><span style="margin-left:auto;color:var(--muted)">'+genreCount[g]+'</span></label>';
+    }).join('');
+    genreCtrl='<details class="moremenu" id="genreDet"'+(genreOpen?' open':'')+'><summary class="btn sec'+(libGenres.length?' on':'')+'">Generi'+sel+'</summary>'+
+      '<div class="morepop" style="min-width:230px">'+
+      '<input id="genreSearch" type="search" placeholder="Cerca genere…" autocomplete="off" value="'+esc(genreQuery)+'" style="width:100%;box-sizing:border-box;margin-bottom:6px">'+
+      '<div id="genreList" style="max-height:300px;overflow:auto">'+rows+'</div>'+
+      (libGenres.length?'<button class="btn sec" id="genreClear" style="margin-top:8px;padding:5px 11px;width:100%">Azzera filtro ('+libGenres.length+')</button>':'')+
+      '</div></details>';
+  }else{
+    // nessun genere ancora: niente controllo in barra. Il filtro compare quando i
+    // generi ci sono (si popolano aprendo le Info MAL o con "Aggiorna generi" nel menu).
+    genreCtrl='';
+  }
   // intestazione libreria con Filtra/Ordina (riferiti alla libreria, non a "Continua a leggere")
   html+='<div class="libhead"><h3 class="sec" style="margin:0">La mia libreria ('+ids.length+')</h3>'+
     '<input id="libSearch" type="search" placeholder="Filtra…" autocomplete="off" value="'+esc(libQuery)+'" style="margin-left:auto;width:170px">'+
+    genreCtrl+
     '<button class="btn sec" id="densBtn" title="Densità griglia">'+(libDensity==="compact"?"▦":"▥")+'</button>'+
     '<select id="sortSel" style="padding:9px 11px"><option value="recent">Recenti</option><option value="alpha">A-Z</option><option value="unread">Non letti</option><option value="updated">Aggiornati</option></select></div>';
   // barra azioni in blocco
@@ -729,6 +809,8 @@ function renderLibrary(){
   const q=libQuery.trim().toLowerCase();
   let arr=ids.map(k=>({k,o:DB.follows[k],p:DB.progress[k]||{}}));
   if(q)arr=arr.filter(x=>(x.o.title||"").toLowerCase().includes(q));
+  // filtro per generi MAL: tiene i manga che hanno TUTTI i generi selezionati (AND)
+  if(libGenres.length)arr=arr.filter(x=>{const g=x.o.genres||[];return libGenres.every(s=>g.includes(s));});
   const sortFn=(a,b)=>libSort==="alpha"?(a.o.title||"").localeCompare(b.o.title||"")
     :libSort==="unread"?(effUnread(b.o)-effUnread(a.o))
     :libSort==="updated"?((parseFloat(b.o.latestNum)||0)-(parseFloat(a.o.latestNum)||0))
@@ -757,6 +839,18 @@ function renderLibrary(){
   if(libQuery){const e=$("#libSearch");if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}}
   const ss=$("#sortSel");if(ss){ss.value=libSort;ss.onchange=()=>{libSort=ss.value;persistLib();renderLibrary();};}
   v.querySelectorAll("[data-cat]").forEach(c=>c.onclick=()=>{libFilter=c.dataset.cat;persistLib();renderLibrary();});
+  const gDet=$("#genreDet");if(gDet)gDet.addEventListener("toggle",()=>{genreOpen=gDet.open;});
+  const gSearch=$("#genreSearch");
+  if(gSearch){
+    gSearch.oninput=()=>{genreQuery=gSearch.value;const qq=genreQuery.toLowerCase();
+      $("#genreList").querySelectorAll("label").forEach(l=>{const g=l.querySelector(".genrebox").value.toLowerCase();l.style.display=(!qq||g.includes(qq))?"flex":"none";});};
+    if(genreOpen&&genreQuery){gSearch.focus();gSearch.setSelectionRange(gSearch.value.length,gSearch.value.length);}
+  }
+  v.querySelectorAll(".genrebox").forEach(cb=>cb.onchange=()=>{const g=cb.value;
+    if(cb.checked){if(!libGenres.includes(g))libGenres.push(g);}else libGenres=libGenres.filter(x=>x!==g);
+    genreOpen=true;persistLib();renderLibrary();});
+  const gClear=$("#genreClear");if(gClear)gClear.onclick=()=>{libGenres=[];genreOpen=true;persistLib();renderLibrary();};
+  const gScanM=$("#genreScanMenu");if(gScanM)gScanM.onclick=scanGenres;
   bindLib(v);
 }
 function bindLib(v){
@@ -977,6 +1071,36 @@ async function checkUpdatesManual(){
   await autoCheck(false);
   renderLibrary();
   toast("Aggiornamenti controllati");
+}
+let genreScanning=false;
+async function scanGenres(){
+  if(genreScanning){toast("Scansione generi già in corso…");return;}
+  // tutti i manga non ancora scansionati (per ID se presente, altrimenti per titolo)
+  const todo=Object.keys(DB.follows).filter(k=>DB.follows[k].genres===undefined);
+  if(!todo.length){toast("Generi già scaricati per tutta la libreria ✓");return;}
+  genreScanning=true;
+  const gm=$("#genreScanMenu");const orig=gm?gm.textContent:"";
+  let done=0;const BATCH=20;
+  try{
+    for(let i=0;i<todo.length;i+=BATCH){
+      if(gm)gm.textContent="Generi… "+done+"/"+todo.length;
+      const chunk=todo.slice(i,i+BATCH).map(k=>({key:k,malId:DB.follows[k].malId||"",title:DB.follows[k].title||""}));
+      try{
+        const r=await fetch("/mal/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:chunk})});
+        const res=(await r.json()).results||{};
+        for(const it of chunk){
+          const f=DB.follows[it.key];if(!f)continue;
+          const got=res[it.key];
+          if(got){if(got.malId&&!f.malId)f.malId=got.malId;f.genres=got.genres||[];}
+          else f.genres=[];  // nessun risultato: segnato come scansionato (non riprovato)
+        }
+        await saveDB();
+      }catch(e){/* blocco fallito: non segno, verrà ritentato a una nuova scansione */}
+      done+=chunk.length;
+    }
+  }finally{genreScanning=false;if(gm)gm.textContent=orig;}
+  toast("Generi da MAL scaricati ✓");
+  renderLibrary();
 }
 let autoTimer;
 function scheduleAuto(){if(autoTimer)clearInterval(autoTimer);const h=SET.autoHours||6;if(h>0)autoTimer=setInterval(()=>autoCheck(true),h*3600*1000);}

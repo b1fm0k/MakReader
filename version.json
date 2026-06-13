@@ -1,5 +1,5 @@
 {
-  "version": "1.1.1",
-  "binaryVersion": "1.1.1",
-  "notes": "Nuova sorgente italiana finalmente funzionante: MangaWorld (ricerca, scheda, lettura).\nWeebCentral: risolto il \"?\" sul numero dei capitoli.\nControllo aggiornamenti molto più veloce.\nL'app ora avvisa quando un aggiornamento richiede di riscaricare il programma (con backup della libreria).\nRiavvio automatico dopo l'aggiornamento.\nI manga \"Dropped\" non mostrano più i capitoli non letti.\nMangaFox: niente più capitoli di altri manga in coda.\nImport da MyAnimeList più sicuro.\nVarie correzioni e migliorie di stabilità."
+  "version": "1.1.2",
+  "binaryVersion": "1.1.2",
+  "notes": "Filtro della libreria per generi di MyAnimeList (a faccette: le opzioni si restringono man mano che selezioni).\nI generi di MAL vengono associati ai manga aprendo le \"Info da MyAnimeList\", con possibilità di correggere un abbinamento sbagliato.\nNella scheda i generi mostrati sono quelli di MAL.\nNuova sorgente italiana MangaWorld; correzioni a WeebCentral e MangaFox.\nControllo aggiornamenti molto più veloce.\nL'app avvisa quando un aggiornamento richiede di riscaricare il programma.\nRiavvio automatico dopo l'aggiornamento e varie migliorie di stabilità."
 }
