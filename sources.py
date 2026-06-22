@@ -487,7 +487,7 @@ class MangaDex(Source):
             for c in feed.get("data", []):
                 ca = c["attributes"]
                 chapters.append({"id": c["id"], "name": self.chlabel + " " + (ca.get("chapter") or "?"),
-                                 "number": ca.get("chapter") or ""})
+                                 "number": ca.get("chapter") or "", "vol": ca.get("volume") or ""})
             off += 100
             if off >= feed.get("total", 0) or not feed.get("data"):
                 break
@@ -715,7 +715,8 @@ class Comick(Source):
                 nm = self.chlabel + " " + str(chap)
                 if c.get("title"):
                     nm += " - " + c["title"]
-                chapters.append({"id": c["hid"], "name": nm, "number": str(chap)})
+                chapters.append({"id": c["hid"], "name": nm, "number": str(chap),
+                                 "vol": str(c.get("vol") or "")})
             if len(chs) < 100:
                 break
             page += 1

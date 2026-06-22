@@ -20,7 +20,7 @@ import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.4"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -185,6 +185,7 @@ DATA_FILE = os.path.join(DATA_DIR, "library.json")   # dati condivisi
 INDEX_FILE = os.path.join(HERE, "index.html")        # codice/app
 VERSION_FILE = os.path.join(HERE, "version.json")    # codice/app
 DL = downloads.Manager(DATA_DIR)                      # download condivisi
+EXPORT = downloads.ExportManager(DATA_DIR)            # esportazione ZIP
 UPDATE_FILES = ["index.html", "sources.py", "downloads.py", "version.json"]
 
 
@@ -423,6 +424,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, f.read(), ct, extra={"Cache-Control": "max-age=604800"})
             return
 
+        if path == "/export/status":
+            j = EXPORT.status(q.get("job", [""])[0])
+            if not j:
+                self._json({"error": "job sconosciuto"}, 404)
+            else:
+                self._json({"status": j["status"], "done": j["done"],
+                            "total": j["total"], "error": j["error"]})
+            return
+
+        if path == "/export/file":
+            fp, fname = EXPORT.ready_file(q.get("job", [""])[0])
+            if not fp:
+                self._send(404, "zip non pronto", "text/plain")
+                return
+            with open(fp, "rb") as f:
+                self._send(200, f.read(), "application/zip",
+                           extra={"Content-Disposition": 'attachment; filename="%s"' % fname})
+            return
+
         if path == "/img":
             url = q.get("url", [""])[0]
             ref = q.get("ref", [""])[0] or None
@@ -514,6 +534,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"error": str(e)}, 400)
             return
+        if p.path == "/export/start":
+            # avvia la preparazione di uno ZIP in background; restituisce il jobId
+            try:
+                body = json.loads(raw)
+                title = body.get("title") or "manga"
+                chapters = body.get("chapters") or []
+                if not chapters:
+                    self._json({"error": "nessun capitolo"}, 400)
+                    return
+                jid = EXPORT.start(title, chapters, body.get("source") or "")
+                self._json({"jobId": jid})
+            except Exception as e:
+                self._json({"error": str(e)}, 400)
+            return
         if p.path == "/mal/scan":
             # scarica i generi da MAL per un blocco di manga (uno per volta, con
             # una pausa: MAL/Jikan limita le richieste). Restituisce {key: [generi]}.
@@ -555,10 +589,13 @@ class Handler(BaseHTTPRequestHandler):
 
             def _restart():
                 try:
+                    # "restarted" dice al nuovo processo di NON riaprire il browser
+                    # (la scheda esistente si ricarica da sé: evita la finestra doppia)
                     if getattr(sys, "frozen", False):
-                        os.execv(sys.executable, [sys.executable, str(CURRENT_PORT)])
+                        os.execv(sys.executable, [sys.executable, str(CURRENT_PORT), "restarted"])
                     else:
-                        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), str(CURRENT_PORT)])
+                        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__),
+                                                  str(CURRENT_PORT), "restarted"])
                 except Exception:
                     os._exit(0)
             threading.Timer(0.5, _restart).start()
@@ -619,7 +656,9 @@ def main():
     CURRENT_PORT = port
     url = "http://localhost:%d" % port
     print("\n  MakReader avviato!  Apri:  %s\n  (premi Ctrl+C per fermare)\n" % url, flush=True)
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    # apri il browser solo all'avvio normale, NON dopo un riavvio (la scheda si ricarica già)
+    if "restarted" not in sys.argv:
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -464,9 +464,11 @@ async function openDetail(src,id,known){
          ${resumeBtn}
          <button class="btn sec" id="readFirst">Leggi dall'inizio</button>
          <button class="btn sec" id="dlAll">⬇ Scarica tutti</button>
+         <button class="btn sec" id="exportBtn">⤓ Esporta ZIP</button>
          ${crossBtn}
          <button class="btn sec" id="malBtn">MAL ↗</button>
        </div>
+       <div id="exportPanel" class="hidden" style="margin-top:10px"></div>
      </div>
    </div>
    </div>
@@ -528,6 +530,7 @@ async function openDetail(src,id,known){
   $("#readFirst").onclick=()=>{if(d.chapters.length)openReader(src,d.chapters,0,k,d.title,cover,refHost);};
   if(resumeIdx>=0)$("#resumeBtn").onclick=()=>openReader(src,d.chapters,resumeIdx,k,d.title,cover,refHost,prog.lastPage||0);
   $("#dlAll").onclick=async()=>{if(!d.chapters.length)return;if(confirm(`Scaricare tutti i ${d.chapters.length} capitoli? Può richiedere tempo.`)){await downloadChapters(d.chapters.map(c=>({source:src,chapter_id:c.id,manga_key:k,title:d.title,chapter_name:c.name||('Cap. '+c.number)})));toast("Download in coda");}};
+  $("#exportBtn").onclick=()=>openExportPanel(src,d);
   const cb=$("#crossBtn");if(cb)cb.onclick=()=>crossSearch(d.title||(known&&known.title)||"",src,!!DB.follows[k]?k:null);
   const mb=$("#malBtn");if(mb)mb.onclick=()=>window.open(malUrl,"_blank");
   const shb=$("#shareBtn");if(shb)shb.onclick=()=>openShareModal([{source:src,id,title:d.title||(known&&known.title)||"",cover:cover}]);
@@ -722,6 +725,85 @@ async function fixMal(k,title){
   await loadMal(id,title,k);       // ricarica il pannello col manga giusto e risalva
   toast("Collegamento MAL aggiornato ✓");
 }
+function openExportPanel(src,d){
+  const p=$("#exportPanel");if(!p)return;
+  if(!p.classList.contains("hidden")){p.classList.add("hidden");p.innerHTML="";return;}
+  if(!d.chapters.length){toast("Nessun capitolo da esportare");return;}
+  const first=d.chapters[0].number||"1", last=d.chapters[d.chapters.length-1].number||"";
+  p.classList.remove("hidden");
+  p.innerHTML='<div style="border:1px solid rgba(128,128,128,.3);border-radius:8px;padding:12px;max-width:480px">'+
+    '<div style="font-weight:500;margin-bottom:8px">Esporta come ZIP</div>'+
+    '<label style="display:block;margin-bottom:6px"><input type="radio" name="expmode" value="all" checked> Tutto il manga ('+d.chapters.length+' capitoli)</label>'+
+    '<label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap"><input type="radio" name="expmode" value="range"> Da capitolo <input id="expFrom" type="text" value="'+esc(first)+'" style="width:64px"> a <input id="expTo" type="text" value="'+esc(last)+'" style="width:64px"></label>'+
+    '<button class="btn" id="expStart" style="padding:6px 12px">Prepara ZIP</button>'+
+    '<div id="expStatus" class="sub" style="margin-top:8px"></div>'+
+    '<div class="sub" style="margin-top:6px;opacity:.8">Scarica le pagine al momento (anche se già offline) e crea uno ZIP con nomi ordinati.</div></div>';
+  $("#expStart").onclick=()=>startExport(src,d);
+}
+async function startExport(src,d){
+  const mode=(document.querySelector('input[name="expmode"]:checked')||{}).value||"all";
+  let chs=d.chapters.slice();
+  if(mode==="range"){
+    const a=parseFloat($("#expFrom").value), b=parseFloat($("#expTo").value);
+    if(isNaN(a)||isNaN(b)){toast("Intervallo non valido");return;}
+    const lo=Math.min(a,b), hi=Math.max(a,b);
+    chs=chs.filter(c=>{const n=parseFloat(c.number);return !isNaN(n)&&n>=lo&&n<=hi;});
+  }
+  if(!chs.length){toast("Nessun capitolo nell'intervallo");return;}
+  const st=$("#expStatus"), btn=$("#expStart");
+  btn.disabled=true; st.textContent="Avvio…";
+  const payload={title:d.title||"manga",source:metaOf(src).name,chapters:chs.map(c=>({source:src,chapter_id:c.id,number:c.number||"",vol:c.vol||"",name:c.name||("Cap. "+(c.number||""))}))};
+  let jid;
+  try{const r=await fetch("/export/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const j=await r.json();if(j.error)throw new Error(j.error);jid=j.jobId;}
+  catch(e){st.textContent="Errore: "+esc(e.message||String(e));btn.disabled=false;return;}
+  EXPORTS.push({id:jid,title:payload.title,source:payload.source||"",status:"preparing",done:0,total:chs.length,error:""});
+  const pan=$("#exportPanel");if(pan)pan.dataset.job=jid;
+  btn.disabled=false;
+  ensureActivityPoll();renderExpInline();updateDlBadge();
+}
+let EXPORTS=[], _actPoll=null;
+function expById(id){return EXPORTS.find(e=>e.id===id);}
+function activeCount(){
+  const d=DLITEMS.filter(i=>i.status==="downloading"||i.status==="queued").length;
+  const e=EXPORTS.filter(x=>x.status==="preparing").length;
+  return d+e;
+}
+function updateDlBadge(){
+  const b=$("#dlBtn");if(!b)return;
+  const n=activeCount();
+  b.innerHTML="⬇ Download"+(n?` <span style="background:var(--good);color:#06231a;border-radius:9px;padding:0 6px;font-size:11px;font-weight:800">${n}</span>`:"");
+}
+function ensureActivityPoll(){
+  if(_actPoll)return;
+  _actPoll=setInterval(async()=>{
+    for(const e of EXPORTS.filter(x=>x.status!=="done"&&x.status!=="error")){
+      try{const s=await jget("/export/status?job="+encodeURIComponent(e.id));
+        const justDone=s.status==="done"&&e.status!=="done";
+        e.status=s.status;e.done=s.done;e.total=s.total;e.error=s.error;
+        if(justDone)toast("ZIP pronto: "+e.title);
+      }catch(err){}
+    }
+    await loadDownloads();
+    renderExpInline();updateDlBadge();
+    if(!$("#importModal").classList.contains("hidden")&&$("#expRows"))renderExpRows();
+    const busy=EXPORTS.some(e=>e.status==="preparing")||DLITEMS.some(i=>i.status==="downloading"||i.status==="queued");
+    if(!busy){clearInterval(_actPoll);_actPoll=null;}
+  },1500);
+}
+function expRowHtml(e){
+  const dl=e.status==="done"?`<a class="btn" href="/export/file?job=${encodeURIComponent(e.id)}" style="padding:3px 9px">⬇ ZIP</a>`:'';
+  const st=e.status==="done"?'<span style="color:var(--good)">pronto</span>':e.status==="error"?`<span style="color:var(--warn)">errore</span>`:`preparazione ${e.done}/${e.total}`;
+  const src=e.source?(esc(e.source)+" · "):"";
+  return `<div class="srcrow"><div class="info"><div class="nm" style="font-size:14px">${esc(e.title)}</div><div class="nt">${src}${st}</div></div>${dl}</div>`;
+}
+function renderExpRows(){const c=$("#expRows");if(c)c.innerHTML=EXPORTS.length?EXPORTS.slice().reverse().map(expRowHtml).join(""):'<div class="empty">Nessuna esportazione.</div>';}
+function renderExpInline(){
+  const p=$("#exportPanel");if(!p||p.classList.contains("hidden"))return;
+  const e=expById(p.dataset.job||"");const st=$("#expStatus");if(!e||!st)return;
+  if(e.status==="done")st.innerHTML=`✓ Pronto. <a class="btn" href="/export/file?job=${encodeURIComponent(e.id)}" style="padding:4px 10px;display:inline-block;margin-left:4px">⬇ Scarica ZIP</a>`;
+  else if(e.status==="error")st.textContent="Errore: "+(e.error||"");
+  else st.textContent="Preparazione… "+e.done+"/"+e.total+" capitoli";
+}
 async function resumeReading(src,id){
   const k=key(src,id),prog=DB.progress[k];
   try{const d=await jget(`/details?source=${encodeURIComponent(src)}&url=${encodeURIComponent(id)}`);
@@ -855,7 +937,7 @@ function renderLibrary(){
 }
 function bindLib(v){
   $("#importMal").onclick=()=>$("#malFile").click();
-  $("#dlBtn").onclick=openDownloadsModal;
+  $("#dlBtn").onclick=openDownloadsModal;updateDlBadge();
   $("#backupBtn").onclick=exportLibrary;
   $("#restoreBtn").onclick=()=>$("#backupFile").click();
   const ub=$("#updBtn");if(ub)ub.onclick=checkUpdatesManual;
@@ -1016,17 +1098,19 @@ document.addEventListener("keydown",e=>{if($("#reader").style.display!=="block")
 // ---------- download offline ----------
 let DLITEMS=[],DLSET=new Set();
 async function loadDownloads(){try{const d=await jget("/downloads");DLITEMS=d.items||[];DLSET=new Set(DLITEMS.filter(i=>i.status==="done").map(i=>i.source+"::"+i.chapter_id));}catch(e){}}
-async function downloadChapters(items){await fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(items)});setTimeout(loadDownloads,1500);}
+async function downloadChapters(items){await fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(items)});await loadDownloads();updateDlBadge();ensureActivityPoll();}
 function openDownloadsModal(){
   loadDownloads().then(()=>{
     const box=$("#importBox");
     const sorted=[...DLITEMS].sort((a,b)=>(b.ts||0)-(a.ts||0));
-    box.innerHTML=`<h2>Download offline</h2><p class="sub">${sorted.filter(i=>i.status==='done').length} capitoli scaricati. I capitoli scaricati si leggono senza connessione.</p>
-      <div style="max-height:56vh;overflow:auto">${sorted.length?sorted.map(i=>{
+    const expSec=EXPORTS.length?`<h2 style="font-size:16px">Esportazioni ZIP</h2><div id="expRows" style="max-height:26vh;overflow:auto;margin-bottom:14px"></div>`:'';
+    box.innerHTML=`${expSec}<h2>Download offline</h2><p class="sub">${sorted.filter(i=>i.status==='done').length} capitoli scaricati. I capitoli scaricati si leggono senza connessione.</p>
+      <div style="max-height:48vh;overflow:auto">${sorted.length?sorted.map(i=>{
         const st=i.status==="done"?`<span style="color:var(--good)">✓ scaricato</span>`:i.status==="downloading"?`scarico ${i.done}/${i.total}`:i.status==="error"?`<span style="color:var(--warn)">errore</span>`:"in coda";
         return `<div class="srcrow"><div class="info"><div class="nm" style="font-size:14px">${esc(i.title||"?")}</div><div class="nt">${esc(i.chapter_name||"")} · ${esc(metaOf(i.source).name)} · ${st}</div></div><button class="ricon" data-del="${i.id}" title="Elimina">🗑</button></div>`;
       }).join(""):'<div class="empty">Nessun download.</div>'}</div>
       <div class="row"><button class="btn sec" id="dlRefresh">Aggiorna</button><button class="btn" id="dlClose">Chiudi</button></div>`;
+    renderExpRows();
     $("#importModal").classList.remove("hidden");
     $("#dlClose").onclick=()=>$("#importModal").classList.add("hidden");
     $("#dlRefresh").onclick=openDownloadsModal;
@@ -1058,6 +1142,7 @@ async function autoCheck(notify){
     f.unread=unread; if(unread>0)newCount++;
   }
   saveDB();
+  localStorage.setItem("lastAutoCheck",String(Date.now()));  // ricorda quando ho controllato
   const tot=Object.values(DB.follows).reduce((a,f)=>a+(effUnread(f)>0?1:0),0);
   setBadge(tot);
   if(document.querySelector(".tab.active")&&document.querySelector(".tab.active").dataset.tab==="library")renderLibrary();
@@ -1214,8 +1299,16 @@ $("#quitTop").onclick=quitApp;
   if(!DB.suggestions)DB.suggestions=[];
   await loadDownloads();
   fillSourceSelect();renderLibrary();setSugBadge();
-  // controllo non letti in background (non blocca l'avvio)
-  setTimeout(()=>{if(Object.keys(DB.follows).length)autoCheck(false);},1500);
+  // controllo non letti all'avvio: solo se l'automatico è attivo E se è davvero
+  // passato l'intervallo dall'ultimo controllo (niente scansione a ogni apertura)
+  setTimeout(()=>{
+    if(!Object.keys(DB.follows).length)return;
+    const h=(SET&&SET.autoHours!=null)?SET.autoHours:6;
+    if(h<=0)return;  // "solo manuale": nessun controllo automatico
+    const last=parseInt(localStorage.getItem("lastAutoCheck")||"0",10)||0;
+    if(Date.now()-last < h*3600*1000)return;  // intervallo non ancora trascorso
+    autoCheck(false);
+  },1500);
   scheduleAuto();
 })();
 </script>
