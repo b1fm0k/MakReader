@@ -14,6 +14,7 @@ import re
 import ssl
 import time
 import json
+import calendar
 import html as _html
 import urllib.request
 import urllib.parse
@@ -129,6 +130,17 @@ def unpack_js(source):
     return re.sub(r"\b\w+\b", repl, payload)
 
 
+def _parse_iso(s):
+    """Data ISO8601 -> epoch UTC (float). 0 se non interpretabile."""
+    s = str(s or "").strip().replace("Z", "").split(".")[0].replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return calendar.timegm(time.strptime(s, fmt))
+        except ValueError:
+            continue
+    return 0.0
+
+
 # ============================================================
 #  Sorgente base
 # ============================================================
@@ -147,6 +159,10 @@ class Source:
 
     def pages(self, chapter_id):
         raise NotImplementedError
+
+    def latest_feed(self, limit=30):
+        """Ultime uscite caricate sulla fonte: [{id,title,cover,chapter,ts}]. Vuoto se non supportato."""
+        return []
 
 
 # ============================================================
@@ -253,6 +269,53 @@ class WeebCentral(Source):
             m = re.search(r'<meta[^>]+name="%s"[^>]+content="([^"]*)"' % prop, page)
         return _clean(m.group(1)) if m else ""
 
+    def latest_feed(self, limit=30):
+        html = http_get(self.base + "/", referer=self.base + "/")
+        i = html.find("Latest Updates")  # salta "Hot Updates", prendi gli ultimi per orario
+        scope = html[i:] if i >= 0 else html
+        # struttura: <a .../series/ID/slug>...<picture>...<img alt="Titolo cover" src=cover>...</a>
+        #            <a .../chapters/CID> ...Titolo... Chapter N ... <timestamp ISO> ... </a>
+        pat = re.compile(
+            r'href="(https://weebcentral\.com/series/[0-9A-Za-z]+/[^"]*)"'
+            r'.*?<img[^>]*?\balt="([^"]*?)\s*cover"[^>]*?\bsrc="([^"]+)"'
+            r'.*?href="(https://weebcentral\.com/chapters/[^"]+)"[^>]*>(.*?)</a>',
+            re.S | re.I)
+        # nell'HTML l'attributo src può venire prima di alt: provo entrambe le forme
+        pat2 = re.compile(
+            r'href="(https://weebcentral\.com/series/[0-9A-Za-z]+/[^"]*)"'
+            r'.*?<img[^>]*?\bsrc="([^"]+)"[^>]*?\balt="([^"]*?)\s*cover"'
+            r'.*?href="(https://weebcentral\.com/chapters/[^"]+)"[^>]*>(.*?)</a>',
+            re.S | re.I)
+        out, seen = [], set()
+        for m in pat.finditer(scope):
+            surl, title, cover, churl, ctext = m.groups()
+            if churl in seen:
+                continue
+            seen.add(churl)
+            txt = _clean(re.sub(r"<[^>]+>", " ", ctext))
+            nm = re.search(r"(?:Chapter|Episode)\s+([\d.]+)", txt, re.I)
+            tsm = re.search(r"(\d{4}-\d{2}-\d{2}T[\d:.]+)", txt)
+            out.append({"source": self.id, "id": surl, "title": _clean(title), "cover": cover,
+                        "chapter": ("Cap. " + nm.group(1)) if nm else "Nuovo capitolo",
+                        "ts": _parse_iso(tsm.group(1)) if tsm else 0})
+            if len(out) >= limit:
+                break
+        if not out:  # fallback con src prima di alt
+            for m in pat2.finditer(scope):
+                surl, cover, title, churl, ctext = m.groups()
+                if churl in seen:
+                    continue
+                seen.add(churl)
+                txt = _clean(re.sub(r"<[^>]+>", " ", ctext))
+                nm = re.search(r"(?:Chapter|Episode)\s+([\d.]+)", txt, re.I)
+                tsm = re.search(r"(\d{4}-\d{2}-\d{2}T[\d:.]+)", txt)
+                out.append({"source": self.id, "id": surl, "title": _clean(title), "cover": cover,
+                            "chapter": ("Cap. " + nm.group(1)) if nm else "Nuovo capitolo",
+                            "ts": _parse_iso(tsm.group(1)) if tsm else 0})
+                if len(out) >= limit:
+                    break
+        return out
+
 
 # ============================================================
 #  Famiglia "FMcDN" (fanfox / mangahere) - stesso motore
@@ -260,6 +323,7 @@ class WeebCentral(Source):
 class _FMcDN(Source):
     cookie = "isAdult=1"
     mirrors = []
+    feed_path = "/releases"
 
     def _get(self, path_or_url, referer=None):
         url = _abs(path_or_url, self.base)
@@ -367,6 +431,31 @@ class _FMcDN(Source):
                 best_f, best = fv, n
         return best
 
+    def latest_feed(self, limit=30):
+        html = self._get(self.feed_path, referer=self.base + "/")
+        # scheda: <a href="/manga/slug/" title="Titolo"><img src=cover> ... N New Chapter
+        #         ... X hour/min/day ago ... <a href="/manga/slug/cNNN/1.html">
+        pat = re.compile(
+            r'<a\s+href="((?:https?://[^"]*)?/manga/[^"]+?/)"[^>]*title="([^"]*)"[^>]*>\s*'
+            r'<img[^>]+src="([^"]+)"'
+            r'.*?(\d+)\s*(hour|min|minute|day)s?\s*ago'
+            r'.*?/c([\d.]+)/1\.html',
+            re.S | re.I)
+        mult = {"hour": 3600, "min": 60, "minute": 60, "day": 86400}
+        out, seen, now = [], set(), time.time()
+        for m in pat.finditer(html):
+            murl, title, cover, tn, tu, cnum = m.groups()
+            murl = _abs(murl, self.base)
+            if murl in seen:
+                continue
+            seen.add(murl)
+            out.append({"source": self.id, "id": murl, "title": _clean(title),
+                        "cover": _abs(cover, self.base), "chapter": "Cap. " + cnum,
+                        "ts": now - int(tn) * mult.get(tu.lower(), 3600)})
+            if len(out) >= limit:
+                break
+        return out
+
     def pages(self, chapter_id):
         page = self._get(chapter_id, referer=self.base + "/")
         cid = re.search(r"var\s+chapterid\s*=\s*(\d+)", page)
@@ -418,6 +507,7 @@ class MangaHere(_FMcDN):
     id = "mangahere"
     name = "MangaHere"
     base = "https://www.mangahere.cc"
+    feed_path = "/latest"
     note = "Stesso motore di MangaFox. Lettura pagine: sperimentale."
 
 
@@ -514,6 +604,29 @@ class MangaDex(Source):
         b, h = at["baseUrl"], at["chapter"]["hash"]
         pages = ["%s/data/%s/%s" % (b, h, f) for f in at["chapter"]["data"]]
         return {"pages": pages, "referer": ""}
+
+    def latest_feed(self, limit=30):
+        # serie aggiornate di recente (come la home di MangaDex), copertine incluse
+        url = ("%s/manga?limit=%d&order[latestUploadedChapter]=desc&includes[]=cover_art"
+               "&availableTranslatedLanguage[]=%s"
+               "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica"
+               % (self.base, min(limit, 30), self.lang))
+        data = json.loads(http_get(url))
+        items = []
+        for m in data.get("data", []):
+            a = m["attributes"]
+            t = a.get("title") or {}
+            title = t.get("en") or (list(t.values())[0] if t else "")
+            cover = ""
+            for r in m.get("relationships", []):
+                if r["type"] == "cover_art" and r.get("attributes"):
+                    cover = ("https://uploads.mangadex.org/covers/%s/%s.256.jpg"
+                             % (m["id"], r["attributes"]["fileName"]))
+            lc = (a.get("lastChapter") or "").strip()
+            items.append({"source": self.id, "id": m["id"], "title": _clean(title), "cover": cover,
+                          "chapter": (self.chlabel + " " + lc) if lc else self.chlabel,
+                          "ts": _parse_iso(a.get("updatedAt") or "")})
+        return items
 
 
 class MangaDexIT(MangaDex):
@@ -627,6 +740,34 @@ class MangaWorld(Source):
         page = http_get(manga_id, referer=self.base + "/")
         ch = self._chapters(page)
         return ch[-1]["number"] if ch else ""
+
+    def latest_feed(self, limit=30):
+        html = http_get(self.base + "/", referer=self.base + "/")
+        k = html.find("Ultimi capitoli aggiunti")
+        scope = html[k:] if k >= 0 else html
+        # scheda: <img src=cover alt="Titolo"></a><div class=content>...<a class=manga-title
+        #          href=URL title="Titolo">...<a class=xanh href=URL/read/.. title="Capitolo N">
+        pat = re.compile(
+            r'<img[^>]*\bsrc=([^\s">]+)[^>]*>\s*</a>\s*<div class=content>'
+            r'.*?<a class=manga-title href=([^\s">]+)[^>]*title="([^"]*)"'
+            r'.*?<a class=xanh href=([^\s">]+)[^>]*title="([^"]*)"',
+            re.S | re.I)
+        out, seen, now = [], set(), time.time()
+        for m in pat.finditer(scope):
+            cover, murl, title, churl, clabel = m.groups()
+            murl = _abs(murl, self.base)
+            if murl in seen:
+                continue
+            seen.add(murl)
+            nm = re.search(r"([\d.]+)", clabel)
+            # MangaWorld non dà un orario preciso ("Nuovo"): ordino per posizione
+            out.append({"source": self.id, "id": murl, "title": _clean(title),
+                        "cover": _abs(cover, self.base),
+                        "chapter": ("Cap. " + nm.group(1)) if nm else _clean(clabel),
+                        "ts": now - len(out) * 300})
+            if len(out) >= limit:
+                break
+        return out
 
     def pages(self, chapter_id):
         sep = "&" if "?" in chapter_id else "?"
@@ -757,6 +898,21 @@ class Comick(Source):
         ch = d.get("chapter") or {}
         pages = [self.imgcdn + "/" + im["b2key"] for im in ch.get("md_images", []) if im.get("b2key")]
         return {"pages": pages, "referer": "https://comick.io/"}
+
+    def latest_feed(self, limit=30):
+        data = self._get("/chapter?lang=%s&page=1&order=new" % self.lang)
+        arr = data if isinstance(data, list) else (data.get("chapters") or data.get("data") or [])
+        items = []
+        for c in arr[:limit]:
+            comic = c.get("md_comics") or c.get("comic") or {}
+            slug = comic.get("slug") or comic.get("hid")
+            if not slug:
+                continue
+            items.append({"source": self.id, "id": slug, "title": _clean(comic.get("title") or ""),
+                          "cover": self._cover(comic.get("md_covers")),
+                          "chapter": self.chlabel + " " + str(c.get("chap") or "?"),
+                          "ts": _parse_iso(c.get("created_at") or c.get("updated_at") or "")})
+        return items
 
 
 class ComickIT(Comick):

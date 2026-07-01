@@ -20,7 +20,7 @@ import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.2.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -371,6 +371,28 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"found": True, "mal": normalize_mal(data)})
             except Exception as e:
                 self._json({"found": False, "error": str(e)}, 502)
+            return
+
+        if path == "/feed":
+            # ultime uscite: una fonte (source=id) o più (sources=id1,id2,...),
+            # interrogate in parallelo e mischiate per orario (più recenti prima)
+            one = q.get("source", [""])[0]
+            multi = q.get("sources", [""])[0]
+            ids = [one] if (one and one != "__all__") else [s for s in multi.split(",") if s]
+            ids = [i for i in ids if i in sources.REGISTRY]
+
+            def _feed(sid):
+                try:
+                    return [dict(it, source=sid) for it in sources.REGISTRY[sid].latest_feed(30)]
+                except Exception:
+                    return []
+            out = []
+            if ids:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(ids))) as ex:
+                    for res in ex.map(_feed, ids):
+                        out.extend(res)
+            out.sort(key=lambda x: x.get("ts") or 0, reverse=True)
+            self._json({"items": out[:80]})
             return
 
         if path == "/update/check":

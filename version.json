@@ -1,5 +1,5 @@
 {
-  "version": "1.1.4",
-  "binaryVersion": "1.1.4",
-  "notes": "Esportazione di un manga (o di un intervallo di capitoli) come file ZIP, con nomi ordinati e cartelle per capitolo.\nLe esportazioni avvengono in background: puoi continuare a usare l'app e le ritrovi nel pannello Download.\nIndicatore di attività sul pulsante Download (download/esportazioni in corso).\nNuova sorgente Comick (libreria ampia, multilingua).\nIl riavvio dopo l'aggiornamento non apre più una seconda finestra.\nIl controllo automatico dei capitoli all'avvio rispetta le impostazioni e non si ripete a ogni apertura.\nVarie correzioni e migliorie."
+  "version": "1.2.0",
+  "binaryVersion": "1.2.0",
+  "notes": "Nuova sezione \"Uscite\": le ultime uscite dalle varie fonti, in griglia, con selettore della fonte (ricorda l'ultima scelta).\nBarra in alto riorganizzata: Sorgenti e Impostazioni ora sono icone a destra, i filtri di ricerca stanno nella pagina Cerca.\nImpostazioni raccolte in un'unica pagina (Lettura, Aggiornamenti, Backup, ecc.).\nRiavvio dopo l'aggiornamento senza più la doppia finestra.\nVarie correzioni."
 }

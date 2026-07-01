@@ -120,6 +120,8 @@
   #reader.light .rtop{background:rgba(233,230,223,.9);border-color:#cbc8c0;color:#222}
   .rtop .rtitle{flex:1;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ricon{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:9px;font-size:16px}
+  .navicon,#quitTop{font-size:21px}
+  .navicon.on{border-color:var(--accent);color:var(--accent)}
   #quitTop{flex:none}#quitTop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
   #reader.light .ricon{background:#fff;border-color:#cbc8c0;color:#222}
   .pages{display:flex;flex-direction:column;align-items:center;padding-bottom:80px}
@@ -157,23 +159,31 @@
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
+      <button class="tab" data-tab="latest">Uscite</button>
       <button class="tab" data-tab="suggestions">Suggerimenti <span class="badge hidden" id="sugBadge">0</span></button>
-      <button class="tab" data-tab="sources">Sorgenti</button>
     </div>
-    <div class="search">
-      <select id="searchBy" title="Cerca per"><option value="title">Titolo</option><option value="author">Autore</option></select>
-      <select id="srcSel" title="Sorgente di ricerca"></select>
-      <input id="searchInput" type="search" placeholder="Cerca manga…" autocomplete="off">
+    <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+      <button class="ricon navicon" data-nav="sources" title="Sorgenti">🌐</button>
+      <button class="ricon navicon" data-nav="settings" title="Impostazioni">⚙</button>
+      <button class="ricon" id="quitTop" title="Chiudi MakReader">⏻</button>
     </div>
-    <button class="ricon" id="quitTop" title="Chiudi MakReader">⏻</button>
   </div>
 </header>
 
 <main>
   <div id="view-library"></div>
-  <div id="view-search" class="hidden"></div>
+  <div id="view-search" class="hidden">
+    <div class="search" style="margin-bottom:14px">
+      <select id="searchBy" title="Cerca per"><option value="title">Titolo</option><option value="author">Autore</option></select>
+      <select id="srcSel" title="Sorgente di ricerca"></select>
+      <input id="searchInput" type="search" placeholder="Cerca manga…" autocomplete="off" style="flex:1;min-width:160px">
+    </div>
+    <div id="searchResults"></div>
+  </div>
+  <div id="view-latest" class="hidden"></div>
   <div id="view-suggestions" class="hidden"></div>
   <div id="view-sources" class="hidden"></div>
+  <div id="view-settings" class="hidden"></div>
   <div id="view-detail" class="hidden"></div>
 </main>
 
@@ -236,12 +246,52 @@ async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST"
 
 // ---------- tabs ----------
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
+document.querySelectorAll(".navicon").forEach(t=>t.onclick=()=>showTab(t.dataset.nav));
 function showTab(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
-  ["library","search","suggestions","sources","detail"].forEach(v=>$("#view-"+v).classList.toggle("hidden",v!==name));
+  document.querySelectorAll(".navicon").forEach(t=>t.classList.toggle("on",t.dataset.nav===name));
+  ["library","search","latest","suggestions","sources","settings","detail"].forEach(v=>$("#view-"+v).classList.toggle("hidden",v!==name));
   if(name==="library")renderLibrary();
   if(name==="suggestions")renderSuggestions();
   if(name==="sources")renderSources();
+  if(name==="settings")renderSettings();
+  if(name==="latest")renderLatest();
+  if(name==="search"){const q=($("#searchInput")||{}).value?$("#searchInput").value.trim():"";q?doSearch(q):renderSearchHome();}
+}
+
+// ---------- uscite recenti ----------
+let latestSource=localStorage.getItem("latestSource")||"__all__";
+function relTime(ts){
+  if(!ts)return "";
+  const d=Date.now()/1000-ts;
+  if(d<3600)return Math.max(1,Math.round(d/60))+" min fa";
+  if(d<86400)return Math.round(d/3600)+" ore fa";
+  if(d<172800)return "ieri";
+  return Math.round(d/86400)+" giorni fa";
+}
+function latestCard(it){
+  const cover=it.cover?`<img class="cover" src="${img(it.cover,srcRef(it.source))}" loading="lazy" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>';
+  const meta=esc(it.chapter||"")+(it.ts?(' · '+esc(relTime(it.ts))):'');
+  return `<div class="card" data-src="${esc(it.source)}" data-id="${esc(it.id)}">`+
+    `<span class="srcpill">${esc(metaOf(it.source).name)}</span>${cover}`+
+    `<div class="meta"><div class="t">${esc(it.title)||'?'}</div><div class="s">${meta}</div></div></div>`;
+}
+async function renderLatest(){
+  const v=$("#view-latest");const en=enabledSources();
+  if(latestSource!=="__all__"&&!en.includes(latestSource))latestSource="__all__";
+  const sel='<select id="latestSrc" style="padding:9px 11px"><option value="__all__">Tutte le fonti</option>'+
+    en.map(id=>`<option value="${id}" ${id===latestSource?'selected':''}>${esc(metaOf(id).name)}</option>`).join("")+'</select>';
+  v.innerHTML='<div class="toolbar"><h3 class="sec" style="margin:0">Uscite recenti</h3>'+sel+
+    '<span class="sub" style="margin-left:auto;font-size:12px">caricato sulla fonte</span></div>'+
+    '<div id="latestGrid"><div class="loading"><div class="spin"></div></div></div>';
+  $("#latestSrc").onchange=()=>{latestSource=$("#latestSrc").value;localStorage.setItem("latestSource",latestSource);renderLatest();};
+  const g=$("#latestGrid");
+  try{
+    const url=latestSource==="__all__"?("/feed?sources="+encodeURIComponent(en.join(","))):("/feed?source="+encodeURIComponent(latestSource));
+    const d=await jget(url);const items=d.items||[];
+    g.innerHTML=items.length?('<div class="grid">'+items.map(latestCard).join("")+'</div>'):'<div class="empty">Nessuna uscita recente da questa fonte.</div>';
+    g.querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.src,c.dataset.id));
+  }catch(e){g.innerHTML='<div class="errbox">Errore nel caricamento: '+esc(e.message||String(e))+'</div>';}
 }
 
 // ---------- sources ----------
@@ -267,28 +317,41 @@ function renderSources(){
         <label class="switch"><input type="checkbox" data-tog="${id}" ${on?'checked':''}><span class="slider"></span></label>
       </div>`;
     }).join("")+
-    '<p style="color:var(--muted);font-size:13px;line-height:1.6;margin-top:18px">Note: <b>MangaFox</b> e <b>MangaHere</b> condividono lo stesso motore; ricerca e capitoli sono solidi, la lettura delle pagine è sperimentale. <b>MangaFire</b> non è incluso perché protetto da Cloudflare (richiederebbe un browser headless).</p>'+
-    `<h3 class="sec" style="margin-top:26px">Il tuo nome (per i suggerimenti)</h3>
-     <input id="setName" placeholder="Es. Mario" value="${esc(myName())}" style="max-width:260px">
-     <p class="sub" style="margin-top:6px">Comparirà come "Da: ..." sui consigli che invii agli amici.</p>
-     <h3 class="sec" style="margin-top:26px">Aggiornamenti automatici</h3>
-     <label class="ck" style="max-width:520px"><input type="checkbox" id="setNotify" ${SET.notify?'checked':''}><span>Notifiche desktop per i nuovi capitoli</span></label>
-     <div class="fld">Controlla automaticamente ogni</div>
-     <select id="setHours" style="max-width:220px">
-       ${[["0","mai (solo manuale)"],["1","1 ora"],["3","3 ore"],["6","6 ore"],["12","12 ore"],["24","24 ore"]].map(([v2,t])=>`<option value="${v2}" ${String(SET.autoHours)===v2?'selected':''}>${t}</option>`).join("")}
-     </select>
-     <p class="sub" style="margin-top:10px">Il controllo automatico funziona finché MakReader è aperto nel browser.</p>
-     <h3 class="sec" style="margin-top:26px">Aggiornamenti dell'app</h3>
-     <div><button class="btn sec" id="checkUpd">Controlla aggiornamenti</button> <span id="updMsg" class="sub" style="margin-left:8px"></span></div>`;
+    '<p style="color:var(--muted);font-size:13px;line-height:1.6;margin-top:18px">Note: <b>MangaFox</b> e <b>MangaHere</b> condividono lo stesso motore; ricerca e capitoli sono solidi, la lettura delle pagine è sperimentale. <b>MangaFire</b> non è incluso perché protetto da Cloudflare (richiederebbe un browser headless).</p>';
   v.querySelectorAll("[data-tog]").forEach(c=>c.onchange=async()=>{DB.sources.enabled[c.dataset.tog]=c.checked;await saveSources();renderSources();});
   v.querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>move(b.dataset.up,-1));
   v.querySelectorAll("[data-dn]").forEach(b=>b.onclick=()=>move(b.dataset.dn,1));
+}
+function renderSettings(){
+  const v=$("#view-settings");
+  v.innerHTML=`<h3 class="sec">Impostazioni</h3>
+     <h3 class="sec" style="margin-top:6px;font-size:14px">Lettura</h3>
+     <div class="fld">Direzione di lettura</div>
+     <select id="setDir" style="max-width:260px"><option value="ltr" ${SET.dir!=="rtl"?'selected':''}>Sinistra → destra</option><option value="rtl" ${SET.dir==="rtl"?'selected':''}>Destra → sinistra (manga)</option></select>
+     <div class="fld">Larghezza pagina</div>
+     <select id="setWidth" style="max-width:260px">${[["S","Stretta"],["M","Media"],["L","Larga"]].map(([v2,t])=>`<option value="${v2}" ${(SET.width||"M")===v2?'selected':''}>${t}</option>`).join("")}</select>
+     <h3 class="sec" style="margin-top:22px;font-size:14px">Aggiornamenti capitoli</h3>
+     <label class="ck" style="max-width:520px"><input type="checkbox" id="setNotify" ${SET.notify?'checked':''}><span>Notifiche desktop per i nuovi capitoli</span></label>
+     <div class="fld">Controlla automaticamente ogni</div>
+     <select id="setHours" style="max-width:220px">${[["0","mai (solo manuale)"],["1","1 ora"],["3","3 ore"],["6","6 ore"],["12","12 ore"],["24","24 ore"]].map(([v2,t])=>`<option value="${v2}" ${String(SET.autoHours)===v2?'selected':''}>${t}</option>`).join("")}</select>
+     <p class="sub" style="margin-top:10px">Il controllo automatico funziona finché MakReader è aperto nel browser.</p>
+     <h3 class="sec" style="margin-top:22px;font-size:14px">Il tuo nome (per i suggerimenti)</h3>
+     <input id="setName" placeholder="Es. Mario" value="${esc(myName())}" style="max-width:260px">
+     <p class="sub" style="margin-top:6px">Comparirà come "Da: ..." sui consigli che invii agli amici.</p>
+     <h3 class="sec" style="margin-top:22px;font-size:14px">Applicazione</h3>
+     <div class="sub" style="margin-bottom:6px">Backup della libreria (per sicurezza o per spostarla)</div>
+     <div class="row" style="gap:8px"><button class="btn sec" id="setBackup">⤓ Backup</button><button class="btn sec" id="setRestore">⤒ Ripristina</button></div>
+     <div style="margin-top:14px"><button class="btn sec" id="checkUpd">Controlla aggiornamenti</button> <span id="updMsg" class="sub" style="margin-left:8px"></span></div>`;
+  const sd=$("#setDir");if(sd)sd.onchange=e=>{SET.dir=e.target.value;DB.settings=SET;saveDB();};
+  const sw=$("#setWidth");if(sw)sw.onchange=e=>{SET.width=e.target.value;DB.settings=SET;saveDB();};
   $("#setNotify").onchange=async e=>{
     if(e.target.checked&&window.Notification&&Notification.permission!=="granted"){const p=await Notification.requestPermission();if(p!=="granted"){e.target.checked=false;toast("Permesso notifiche negato dal browser");return;}}
     SET.notify=e.target.checked;DB.settings=SET;saveDB();
   };
   $("#setHours").onchange=e=>{SET.autoHours=parseInt(e.target.value);DB.settings=SET;saveDB();scheduleAuto();};
   const sn=$("#setName");if(sn)sn.onchange=e=>{SET.name=e.target.value.trim();DB.settings=SET;saveDB();toast("Nome salvato");};
+  const bb=$("#setBackup");if(bb)bb.onclick=exportLibrary;
+  const rr=$("#setRestore");if(rr)rr.onclick=()=>$("#backupFile").click();
   $("#checkUpd").onclick=async()=>{
     const m=$("#updMsg");m.textContent="Controllo…";
     try{const d=await jget("/update/check");
@@ -329,7 +392,7 @@ let stimer;
 $("#searchInput").addEventListener("input",e=>{clearTimeout(stimer);const q=e.target.value.trim();if(q)stimer=setTimeout(()=>doSearch(q),400);});
 $("#searchInput").addEventListener("focus",()=>{showTab("search");if(!$("#searchInput").value.trim())renderSearchHome();});
 function renderSearchHome(){
-  const v=$("#view-search");
+  const v=$("#searchResults");
   v.innerHTML=recentSearches.length?('<h3 class="sec">Ricerche recenti</h3>'+recentChipsHtml()):'<div class="empty">Scrivi un titolo per cercare.<br>Sorgente: <b>'+esc(curSearchSource==="__all__"?"Tutte le sorgenti":metaOf(curSearchSource).name)+'</b></div>';
   bindRecentChips(v);
 }
@@ -351,7 +414,7 @@ function bindSearchCards(c){c.querySelectorAll(".card").forEach(el=>{if(el._b)re
 async function doSearch(q){
   showTab("search");
   addRecent(q);
-  const v=$("#view-search"), en=enabledSources();
+  const v=$("#searchResults"), en=enabledSources();
   if(!en.length){v.innerHTML='<div class="empty">Nessuna sorgente attiva. Vai su <b>Sorgenti</b>.</div>';return;}
   if(curSearchSource==="__all__")return multiSearch(q,en);
   v.innerHTML=recentChipsHtml()+'<h3 class="sec">'+esc(metaOf(curSearchSource).name)+': '+esc(q)+'</h3><div class="loading"><div class="spin"></div></div>';
@@ -374,7 +437,7 @@ async function doSearch(q){
   }
 }
 async function multiSearch(q,en){
-  const v=$("#view-search");
+  const v=$("#searchResults");
   v.innerHTML=recentChipsHtml()+
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><h3 class="sec" style="margin:0">Tutte le sorgenti: '+esc(q)+'</h3>'+
     '<button class="btn sec" id="grpBtn" style="margin-left:auto;padding:6px 12px">'+(searchGroup?"Raggruppate":"Mescolate")+'</button></div><div id="msArea"></div>';
