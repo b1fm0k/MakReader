@@ -16,6 +16,7 @@
   .bar{display:flex;align-items:center;gap:10px;padding:12px 16px;max-width:1100px;margin:0 auto;flex-wrap:wrap}
   .logoimg{width:30px;height:30px;border-radius:7px;flex:none}
   .logo{font-weight:800;font-size:20px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
+  .vertag{font-size:11px;color:var(--muted);align-self:flex-end;padding-bottom:4px;margin-left:-4px;letter-spacing:.3px}
   .tabs{display:flex;gap:4px;flex:1}
   .tab{background:none;border:none;color:var(--muted);padding:8px 13px;border-radius:9px;font-size:14px;font-weight:600}
   .tab.active{background:var(--panel2);color:var(--text)}
@@ -156,6 +157,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
+    <span class="vertag" title="Versione installata">v1.2.2</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
