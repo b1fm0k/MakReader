@@ -247,10 +247,13 @@ async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST"
 // ---------- tabs ----------
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 document.querySelectorAll(".navicon").forEach(t=>t.onclick=()=>showTab(t.dataset.nav));
-function showTab(name){
+function showView(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
   document.querySelectorAll(".navicon").forEach(t=>t.classList.toggle("on",t.dataset.nav===name));
   ["library","search","latest","suggestions","sources","settings","detail"].forEach(v=>$("#view-"+v).classList.toggle("hidden",v!==name));
+}
+function showTab(name){
+  showView(name);
   if(name==="library")renderLibrary();
   if(name==="suggestions")renderSuggestions();
   if(name==="sources")renderSources();
@@ -412,7 +415,7 @@ function cardHtml(src,m){
 }
 function bindSearchCards(c){c.querySelectorAll(".card").forEach(el=>{if(el._b)return;el._b=1;el.onclick=()=>openDetail(el.dataset.src,el.dataset.id);});}
 async function doSearch(q){
-  showTab("search");
+  showView("search");
   addRecent(q);
   const v=$("#searchResults"), en=enabledSources();
   if(!en.length){v.innerHTML='<div class="empty">Nessuna sorgente attiva. Vai su <b>Sorgenti</b>.</div>';return;}

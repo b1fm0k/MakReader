@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "binaryVersion": "1.2.0",
-  "notes": "Nuova sezione \"Uscite\": le ultime uscite dalle varie fonti, in griglia, con selettore della fonte (ricorda l'ultima scelta).\nBarra in alto riorganizzata: Sorgenti e Impostazioni ora sono icone a destra, i filtri di ricerca stanno nella pagina Cerca.\nImpostazioni raccolte in un'unica pagina (Lettura, Aggiornamenti, Backup, ecc.).\nRiavvio dopo l'aggiornamento senza più la doppia finestra.\nVarie correzioni."
+  "notes": "Corretto un problema per cui la ricerca poteva bloccarsi con \"Failed to fetch\" (e di riflesso si inchiodava anche il pulsante di spegnimento). Ora la ricerca funziona regolarmente."
 }
