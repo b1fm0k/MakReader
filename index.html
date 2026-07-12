@@ -122,7 +122,7 @@
   .rtop .rtitle{flex:1;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ricon{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:9px;font-size:16px}
   .ricon.rlbl{width:auto;min-width:38px;padding:0 9px;font-size:13px;font-weight:700;letter-spacing:.5px}
-  .navicon,#quitTop{font-size:21px}
+  .navicon,#quitTop{font-size:23px}
   .navicon.on{border-color:var(--accent);color:var(--accent)}
   #quitTop{flex:none}#quitTop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
   #reader.light .ricon{background:#fff;border-color:#cbc8c0;color:#222}
@@ -154,6 +154,16 @@
   .impbar{height:8px;background:var(--panel2);border-radius:6px;overflow:hidden;margin:10px 0}
   .impbar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
   .modal .row{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+  /* settings */
+  .setwrap{max-width:680px}
+  .setcard{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:4px 18px;margin-bottom:16px}
+  .setcard h4{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--accent2);margin:16px 0 4px;font-weight:700}
+  .setrow{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .setrow:last-child{border-bottom:none}
+  .setrow .sl{flex:1;min-width:220px}
+  .setrow .sl .t{font-size:14px;font-weight:600}
+  .setrow .sl .d{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5}
+  .setrow select,.setrow input[type=text],.setrow input:not([type]){flex:none}
 </style>
 </head>
 <body>
@@ -161,7 +171,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.2.3</span>
+    <span class="vertag" title="Versione installata">v1.2.5</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -170,7 +180,7 @@
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
       <button class="ricon navicon" data-nav="sources" title="Sorgenti">🌐</button>
-      <button class="ricon navicon" data-nav="settings" title="Impostazioni">⚙</button>
+      <button class="ricon navicon" data-nav="settings" title="Impostazioni">⚙️</button>
       <button class="ricon" id="quitTop" title="Chiudi MakReader">⏻</button>
     </div>
   </div>
@@ -221,7 +231,7 @@
 const $=s=>document.querySelector(s);
 let DB={follows:{},progress:{},history:[],sources:{order:[],enabled:{}},settings:{},suggestions:[]};
 let sugFilter="__all__";
-let SET={dir:"ltr",width:"M",autoHours:6,notify:false};
+let SET={dir:"ltr",width:"M",autoHours:6,notify:false,navFlip:true};
 let META=[];               // [{id,name,note,lang,base}]
 let curSearchSource=localStorage.getItem("searchSource")||"__all__";
 let searchBy=localStorage.getItem("searchBy")||"title";
@@ -335,25 +345,57 @@ function renderSources(){
 }
 function renderSettings(){
   const v=$("#view-settings");
-  v.innerHTML=`<h3 class="sec">Impostazioni</h3>
-     <h3 class="sec" style="margin-top:6px;font-size:14px">Lettura</h3>
-     <div class="fld">Direzione di lettura</div>
-     <select id="setDir" style="max-width:260px"><option value="ltr" ${SET.dir!=="rtl"?'selected':''}>Sinistra → destra</option><option value="rtl" ${SET.dir==="rtl"?'selected':''}>Destra → sinistra (manga)</option></select>
-     <div class="fld">Larghezza pagina</div>
-     <select id="setWidth" style="max-width:260px">${[["S","Stretta"],["M","Media"],["L","Larga"]].map(([v2,t])=>`<option value="${v2}" ${(SET.width||"M")===v2?'selected':''}>${t}</option>`).join("")}</select>
-     <h3 class="sec" style="margin-top:22px;font-size:14px">Aggiornamenti capitoli</h3>
-     <label class="ck" style="max-width:520px"><input type="checkbox" id="setNotify" ${SET.notify?'checked':''}><span>Notifiche desktop per i nuovi capitoli</span></label>
-     <div class="fld">Controlla automaticamente ogni</div>
-     <select id="setHours" style="max-width:220px">${[["0","mai (solo manuale)"],["1","1 ora"],["3","3 ore"],["6","6 ore"],["12","12 ore"],["24","24 ore"]].map(([v2,t])=>`<option value="${v2}" ${String(SET.autoHours)===v2?'selected':''}>${t}</option>`).join("")}</select>
-     <p class="sub" style="margin-top:10px">Il controllo automatico funziona finché MakReader è aperto nel browser.</p>
-     <h3 class="sec" style="margin-top:22px;font-size:14px">Il tuo nome (per i suggerimenti)</h3>
-     <input id="setName" placeholder="Es. Mario" value="${esc(myName())}" style="max-width:260px">
-     <p class="sub" style="margin-top:6px">Comparirà come "Da: ..." sui consigli che invii agli amici.</p>
-     <h3 class="sec" style="margin-top:22px;font-size:14px">Applicazione</h3>
-     <div class="sub" style="margin-bottom:6px">Backup della libreria (per sicurezza o per spostarla)</div>
-     <div class="row" style="gap:8px"><button class="btn sec" id="setBackup">⤓ Backup</button><button class="btn sec" id="setRestore">⤒ Ripristina</button></div>
-     <div style="margin-top:14px"><button class="btn sec" id="checkUpd">Controlla aggiornamenti</button> <span id="updMsg" class="sub" style="margin-left:8px"></span></div>`;
+  const ver=(document.querySelector(".vertag")||{textContent:""}).textContent;
+  v.innerHTML=`<div class="setwrap">
+   <h3 class="sec">Impostazioni</h3>
+
+   <div class="setcard"><h4>Lettura</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Direzione di lettura</div><div class="d">"Destra → sinistra" segue l'ordine originale dei manga giapponesi.</div></div>
+       <select id="setDir"><option value="ltr" ${SET.dir!=="rtl"?'selected':''}>Sinistra → destra</option><option value="rtl" ${SET.dir==="rtl"?'selected':''}>Destra → sinistra (manga)</option></select>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">Inverti la navigazione in modalità manga</div><div class="d">Attivo: freccia e clic a sinistra = avanti quando leggi destra → sinistra.<br>Spento: destra = avanti sempre; la direzione vale solo per l'ordine delle pagine in doppia.</div></div>
+       <label class="switch"><input type="checkbox" id="setNavFlip" ${SET.navFlip!==false?'checked':''}><span class="slider"></span></label>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">Larghezza pagina</div><div class="d">Larghezza massima delle pagine in modalità scroll.</div></div>
+       <select id="setWidth">${[["S","Stretta"],["M","Media"],["L","Larga"]].map(([v2,t])=>`<option value="${v2}" ${(SET.width||"M")===v2?'selected':''}>${t}</option>`).join("")}</select>
+     </div>
+   </div>
+
+   <div class="setcard"><h4>Aggiornamenti capitoli</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Notifiche desktop</div><div class="d">Avvisa quando escono nuovi capitoli dei manga che segui.</div></div>
+       <label class="switch"><input type="checkbox" id="setNotify" ${SET.notify?'checked':''}><span class="slider"></span></label>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">Controllo automatico</div><div class="d">Funziona finché MakReader è aperto nel browser.</div></div>
+       <select id="setHours">${[["0","mai (solo manuale)"],["1","ogni ora"],["3","ogni 3 ore"],["6","ogni 6 ore"],["12","ogni 12 ore"],["24","ogni 24 ore"]].map(([v2,t])=>`<option value="${v2}" ${String(SET.autoHours)===v2?'selected':''}>${t}</option>`).join("")}</select>
+     </div>
+   </div>
+
+   <div class="setcard"><h4>Suggerimenti</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Il tuo nome</div><div class="d">Comparirà come "Da: ..." sui consigli che invii agli amici.</div></div>
+       <input id="setName" placeholder="Es. Mario" value="${esc(myName())}" style="width:180px">
+     </div>
+   </div>
+
+   <div class="setcard"><h4>Applicazione</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Backup della libreria</div><div class="d">Per sicurezza o per spostarla su un altro computer.</div></div>
+       <div style="display:flex;gap:8px"><button class="btn sec" id="setBackup">⤓ Backup</button><button class="btn sec" id="setRestore">⤒ Ripristina</button></div>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">Aggiornamenti di MakReader</div><div class="d">Versione installata: ${esc(ver)}</div></div>
+       <button class="btn sec" id="checkUpd">Controlla</button>
+       <div id="updMsg" class="sub" style="flex-basis:100%;margin:0 0 4px"></div>
+     </div>
+   </div>
+  </div>`;
   const sd=$("#setDir");if(sd)sd.onchange=e=>{SET.dir=e.target.value;DB.settings=SET;saveDB();};
+  const nf=$("#setNavFlip");if(nf)nf.onchange=e=>{SET.navFlip=e.target.checked;DB.settings=SET;saveDB();};
   const sw=$("#setWidth");if(sw)sw.onchange=e=>{SET.width=e.target.value;DB.settings=SET;saveDB();};
   $("#setNotify").onchange=async e=>{
     if(e.target.checked&&window.Notification&&Notification.permission!=="granted"){const p=await Notification.requestPermission();if(p!=="granted"){e.target.checked=false;toast("Permesso notifiche negato dal browser");return;}}
@@ -1140,7 +1182,7 @@ function renderPages(){
     const chk=()=>{if(im.naturalWidth>im.naturalHeight&&!reader.wide.has(i)){reader.wide.add(i);if(reader.dbl)applyPageVis();}};
     im.complete?chk():im.addEventListener("load",chk);
   });
-  if(reader.paged)pg.onclick=e=>{const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl')?!right:right)?nextPage():prevPage();};else pg.onclick=null;
+  if(reader.paged)pg.onclick=e=>{const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl'&&SET.navFlip!==false)?!right:right)?nextPage():prevPage();};else pg.onclick=null;
   applyPageVis();if(reader.paged)preload();
 }
 // gruppi di pagine visibili insieme: [i] singole, [i,i+1] coppie in modalità doppia
@@ -1206,7 +1248,7 @@ $("#rDl").onclick=async()=>{const ch=reader.chapters[reader.idx];await downloadC
 $("#reader").addEventListener("scroll",()=>{if($("#reader").style.display!=="block"||reader.paged)return;const imgs=document.querySelectorAll("#rPages img");const mid=$("#reader").scrollTop+innerHeight/2;for(let i=0;i<imgs.length;i++){if(imgs[i].offsetTop<=mid&&imgs[i].offsetTop+imgs[i].offsetHeight>=mid){reader.page=i;break;}}updatePgi();saveProgress();});
 document.addEventListener("keydown",e=>{if($("#reader").style.display!=="block")return;
   const fwd=e.key==="ArrowRight",back=e.key==="ArrowLeft";
-  if(fwd||back){const goNext=(SET.dir==="rtl")?back:fwd;reader.paged?(goNext?nextPage():prevPage()):(goNext?nextChapter():prevChapter());}
+  if(fwd||back){const goNext=(SET.dir==="rtl"&&SET.navFlip!==false)?back:fwd;reader.paged?(goNext?nextPage():prevPage()):(goNext?nextChapter():prevChapter());}
   if(e.key==="Escape")$("#rClose").click();});
 
 // ---------- download offline ----------

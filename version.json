@@ -1,5 +1,5 @@
 {
-  "version": "1.2.3",
+  "version": "1.2.5",
   "binaryVersion": "1.2.0",
-  "notes": "Lettore: nuova modalità Doppia pagina (due tavole affiancate, come un manga vero; le tavole doppie già unite vengono mostrate da sole).\nIl pulsante direzione ora mostra chiaramente il verso di lettura (1→2 / 2←1) e la scelta viene ricordata al riavvio.\nAnche la modalità di lettura (scroll / pagina / doppia) viene ricordata."
+  "notes": "Impostazioni ridisegnate: schede ordinate con descrizioni e interruttori.\nIcona Impostazioni più visibile nella barra in alto."
 }
