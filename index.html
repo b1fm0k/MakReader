@@ -121,6 +121,7 @@
   #reader.light .rtop{background:rgba(233,230,223,.9);border-color:#cbc8c0;color:#222}
   .rtop .rtitle{flex:1;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ricon{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:9px;font-size:16px}
+  .ricon.rlbl{width:auto;min-width:38px;padding:0 9px;font-size:13px;font-weight:700;letter-spacing:.5px}
   .navicon,#quitTop{font-size:21px}
   .navicon.on{border-color:var(--accent);color:var(--accent)}
   #quitTop{flex:none}#quitTop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
@@ -130,6 +131,9 @@
   .pages.paged{height:calc(100vh - 60px);justify-content:center;padding:0}
   .pages.paged img{max-height:calc(100vh - 80px);width:auto;max-width:100%;object-fit:contain;display:none}
   .pages.paged img.cur{display:block}
+  .pages.paged.dbl{flex-direction:row;align-items:center;justify-content:center}
+  .pages.paged.dbl.rtl{flex-direction:row-reverse}
+  .pages.paged.dbl img.cur{max-width:50%}
   .rnav{position:fixed;bottom:0;left:0;right:0;display:flex;gap:10px;justify-content:center;align-items:center;padding:12px;background:rgba(10,10,10,.85);backdrop-filter:blur(8px);border-top:1px solid #222}
   #reader.light .rnav{background:rgba(233,230,223,.9);border-color:#cbc8c0}
   .rnav .pgi{font-size:13px;color:var(--muted);min-width:80px;text-align:center}
@@ -157,7 +161,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.2.2</span>
+    <span class="vertag" title="Versione installata">v1.2.3</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -196,8 +200,8 @@
     <select id="rChap" title="Vai al capitolo" style="max-width:150px"></select>
     <button class="ricon" id="rDl" title="Scarica capitolo">⬇</button>
     <button class="ricon" id="rWidth" title="Larghezza pagina">↔</button>
-    <button class="ricon" id="rDir" title="Direzione (sinistra/destra)">⇄</button>
-    <button class="ricon" id="rMode" title="Scroll / Pagina">⇅</button>
+    <button class="ricon rlbl" id="rDir" title="Direzione di lettura">1→2</button>
+    <button class="ricon rlbl" id="rMode" title="Modalità di lettura">⇅</button>
     <button class="ricon" id="rLight" title="Giorno / Notte">◐</button>
   </div>
   <div class="pages" id="rPages"></div>
@@ -234,7 +238,9 @@ let libSelect=false, selSet=new Set(), dlCount={};
 let chapView=localStorage.getItem("chapView")||"grid";
 let curDetail=null, detailBack="library";
 function persistLib(){localStorage.setItem("libFilter",libFilter);localStorage.setItem("libSort",libSort);localStorage.setItem("libGroup",libGroup?"1":"0");localStorage.setItem("libDensity",libDensity);localStorage.setItem("libGenres",JSON.stringify(libGenres));}
-let reader={chapters:[],idx:0,pages:[],page:0,paged:false,key:null,source:null,title:"",cover:"",ref:""};
+let readerMode=localStorage.getItem("readerMode")||"scroll";   // scroll | single | double
+if(!["scroll","single","double"].includes(readerMode))readerMode="scroll";
+let reader={chapters:[],idx:0,pages:[],page:0,paged:false,dbl:false,key:null,source:null,title:"",cover:"",ref:"",wide:new Set()};
 
 const key=(src,id)=>src+"||"+id;
 const img=(u,ref)=>"/img?url="+encodeURIComponent(u)+(ref?"&ref="+encodeURIComponent(ref):"");
@@ -1101,9 +1107,10 @@ function setBadge(n){const b=$("#updBadge");if(n>0){b.textContent=n;b.classList.
 // ---------- reader ----------
 const WIDTHS={S:560,M:760,L:1040};
 async function openReader(src,chapters,idx,mangaKey,title,cover,ref,startPage){
-  reader={chapters,idx,pages:[],page:0,paged:reader.paged,key:mangaKey,source:src,title,cover,ref:"",resume:startPage||0,offline:false};
+  reader={chapters,idx,pages:[],page:0,paged:readerMode!=="scroll",dbl:readerMode==="double",key:mangaKey,source:src,title,cover,ref:"",resume:startPage||0,offline:false,wide:new Set()};
   $("#reader").style.display="block";
   $("#rChap").innerHTML=chapters.map((c,i)=>`<option value="${i}">${esc(c.name||('Cap. '+c.number))}</option>`).join("");
+  updateDirBtn();updateModeBtn();
   await loadChapter();
 }
 async function loadChapter(){
@@ -1115,6 +1122,7 @@ async function loadChapter(){
     const d=await jget(`/pages?source=${encodeURIComponent(reader.source)}&url=${encodeURIComponent(ch.id)}`);
     reader.ref=d.referer||"";reader.offline=!!d.offline;
     reader.pages=d.pages.map(u=>u.indexOf("/file?")===0?u:img(u,d.referer));
+    reader.wide=new Set();
     reader.page=Math.min(reader.resume||0,Math.max(0,reader.pages.length-1));reader.resume=0;
     renderPages();updateDlBtn();markRead(ch);recordHistory(ch);
     if(!reader.paged&&reader.page>0)setTimeout(()=>scrollToPage(reader.page),60);
@@ -1123,19 +1131,46 @@ async function loadChapter(){
   }
 }
 function renderPages(){
-  const pg=$("#rPages");pg.className="pages"+(reader.paged?" paged":"");
+  const pg=$("#rPages");pg.className="pages"+(reader.paged?" paged":"")+(reader.dbl?" dbl":"");
   if(!reader.pages.length){pg.innerHTML='<div class="errbox" style="margin:20px">Nessuna pagina trovata.</div>';return;}
   const w=WIDTHS[SET.width]||760;
-  pg.innerHTML=reader.pages.map((u,i)=>`<img src="${u}" loading="${reader.paged?'eager':'lazy'}" style="max-width:${w}px" class="${reader.paged&&i===reader.page?'cur':''}">`).join("");
+  pg.innerHTML=reader.pages.map((u,i)=>`<img src="${u}" loading="${reader.paged?'eager':'lazy'}" style="max-width:${w}px">`).join("");
+  // rileva le pagine "larghe" (tavole doppie già unite): in modalità doppia vanno mostrate da sole
+  pg.querySelectorAll("img").forEach((im,i)=>{
+    const chk=()=>{if(im.naturalWidth>im.naturalHeight&&!reader.wide.has(i)){reader.wide.add(i);if(reader.dbl)applyPageVis();}};
+    im.complete?chk():im.addEventListener("load",chk);
+  });
   if(reader.paged)pg.onclick=e=>{const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl')?!right:right)?nextPage():prevPage();};else pg.onclick=null;
-  updatePgi();if(reader.paged)preload();
+  applyPageVis();if(reader.paged)preload();
 }
-function preload(){const n=reader.page+1;if(n<reader.pages.length){const im=new Image();im.src=reader.pages[n];}}
+// gruppi di pagine visibili insieme: [i] singole, [i,i+1] coppie in modalità doppia
+function pageGroups(){
+  if(!reader.dbl)return reader.pages.map((_,i)=>[i]);
+  const g=[];let i=0;
+  while(i<reader.pages.length){
+    if(reader.wide.has(i)){g.push([i]);i++;continue;}
+    if(i+1<reader.pages.length&&!reader.wide.has(i+1)){g.push([i,i+1]);i+=2;}
+    else{g.push([i]);i++;}
+  }
+  return g;
+}
+function curGroup(){const gs=pageGroups();return gs.find(g=>g.includes(reader.page))||[reader.page];}
+function applyPageVis(){
+  const pg=$("#rPages");
+  pg.classList.toggle("rtl",reader.dbl&&SET.dir==="rtl");
+  if(reader.paged){const g=curGroup();pg.querySelectorAll("img").forEach((im,k)=>im.classList.toggle("cur",g.includes(k)));}
+  updatePgi();
+}
+function preload(){const g=curGroup();const last=g[g.length-1];for(let n=last+1;n<=last+(reader.dbl?2:1)&&n<reader.pages.length;n++){const im=new Image();im.src=reader.pages[n];}}
 function scrollToPage(i){const im=document.querySelectorAll("#rPages img")[i];if(im)$("#reader").scrollTop=im.offsetTop-50;}
-function showPage(i){reader.page=Math.max(0,Math.min(reader.pages.length-1,i));document.querySelectorAll("#rPages img").forEach((im,k)=>im.classList.toggle("cur",k===reader.page));updatePgi();preload();saveProgress();}
-function nextPage(){if(reader.paged){reader.page<reader.pages.length-1?showPage(reader.page+1):nextChapter();}}
-function prevPage(){if(reader.paged){reader.page>0?showPage(reader.page-1):prevChapter();}}
-function updatePgi(){$("#rPgi").textContent=reader.paged?`${reader.page+1} / ${reader.pages.length}`:`${reader.pages.length} pagine`;}
+function showPage(i){reader.page=Math.max(0,Math.min(reader.pages.length-1,i));applyPageVis();preload();saveProgress();}
+function nextPage(){if(!reader.paged)return;const gs=pageGroups(),gi=gs.findIndex(g=>g.includes(reader.page));gi<gs.length-1?showPage(gs[gi+1][0]):nextChapter();}
+function prevPage(){if(!reader.paged)return;const gs=pageGroups(),gi=gs.findIndex(g=>g.includes(reader.page));gi>0?showPage(gs[gi-1][0]):prevChapter();}
+function updatePgi(){
+  if(!reader.paged){$("#rPgi").textContent=`${reader.pages.length} pagine`;return;}
+  const g=curGroup();
+  $("#rPgi").textContent=(g.length>1?`${g[0]+1}-${g[1]+1}`:`${g[0]+1}`)+` / ${reader.pages.length}`;
+}
 function nextChapter(){reader.idx<reader.chapters.length-1?(reader.idx++,loadChapter()):toast("Ultimo capitolo");}
 function prevChapter(){reader.idx>0?(reader.idx--,loadChapter()):toast("Primo capitolo");}
 let saveT;
@@ -1151,10 +1186,21 @@ $("#rClose").onclick=()=>{
 };
 $("#rPrev").onclick=()=>reader.paged?prevPage():prevChapter();
 $("#rNext").onclick=()=>reader.paged?nextPage():nextChapter();
-$("#rMode").onclick=()=>{reader.paged=!reader.paged;renderPages();if(!reader.paged&&reader.page>0)setTimeout(()=>scrollToPage(reader.page),60);toast(reader.paged?"Modalità pagina":"Modalità scroll");};
+const MODES=["scroll","single","double"];
+const MODE_INFO={scroll:["⇅","Scroll verticale"],single:["▯","Pagina singola"],double:["▯▯","Doppia pagina (manga)"]};
+function updateModeBtn(){const b=$("#rMode");b.textContent=MODE_INFO[readerMode][0];b.title="Modalità: "+MODE_INFO[readerMode][1]+" — clic per cambiare";}
+function updateDirBtn(){const b=$("#rDir");const rtl=SET.dir==="rtl";b.textContent=rtl?"2←1":"1→2";b.title="Direzione: "+(rtl?"destra → sinistra (manga)":"sinistra → destra")+" — clic per cambiare";}
+$("#rMode").onclick=()=>{
+  readerMode=MODES[(MODES.indexOf(readerMode)+1)%MODES.length];
+  localStorage.setItem("readerMode",readerMode);
+  reader.paged=readerMode!=="scroll";reader.dbl=readerMode==="double";
+  updateModeBtn();renderPages();
+  if(!reader.paged&&reader.page>0)setTimeout(()=>scrollToPage(reader.page),60);
+  toast("Modalità: "+MODE_INFO[readerMode][1]);
+};
 $("#rLight").onclick=()=>$("#reader").classList.toggle("light");
 $("#rChap").onchange=e=>{reader.idx=+e.target.value;loadChapter();};
-$("#rDir").onclick=()=>{SET.dir=SET.dir==="rtl"?"ltr":"rtl";saveSettings();renderPages();toast(SET.dir==="rtl"?"Lettura ←  destra→sinistra":"Lettura →  sinistra→destra");};
+$("#rDir").onclick=()=>{SET.dir=SET.dir==="rtl"?"ltr":"rtl";saveSettings();updateDirBtn();applyPageVis();toast(SET.dir==="rtl"?"Direzione: destra → sinistra (manga)":"Direzione: sinistra → destra");};
 $("#rWidth").onclick=()=>{const o=["S","M","L"];SET.width=o[(o.indexOf(SET.width)+1)%3];saveSettings();renderPages();toast("Larghezza: "+SET.width);};
 $("#rDl").onclick=async()=>{const ch=reader.chapters[reader.idx];await downloadChapters([{source:reader.source,chapter_id:ch.id,manga_key:reader.key,title:reader.title,chapter_name:ch.name||("Cap. "+ch.number)}]);toast("Download avviato");};
 $("#reader").addEventListener("scroll",()=>{if($("#reader").style.display!=="block"||reader.paged)return;const imgs=document.querySelectorAll("#rPages img");const mid=$("#reader").scrollTop+innerHeight/2;for(let i=0;i<imgs.length;i++){if(imgs[i].offsetTop<=mid&&imgs[i].offsetTop+imgs[i].offsetHeight>=mid){reader.page=i;break;}}updatePgi();saveProgress();});
@@ -1187,7 +1233,7 @@ function openDownloadsModal(){
 }
 
 // ---------- settings + auto-check ----------
-function saveSettings(){fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
+function saveSettings(){DB.settings=SET;saveDB();}
 async function autoCheck(notify){
   let newCount=0;
   // UNA sola richiesta: il motore controlla tutti i manga in parallelo lato server

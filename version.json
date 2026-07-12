@@ -1,5 +1,5 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "binaryVersion": "1.2.0",
-  "notes": "Il numero di versione è ora sempre visibile in alto, accanto al logo.\nRicerca: risolto il blocco che poteva dare \"Failed to fetch\"."
+  "notes": "Lettore: nuova modalità Doppia pagina (due tavole affiancate, come un manga vero; le tavole doppie già unite vengono mostrate da sole).\nIl pulsante direzione ora mostra chiaramente il verso di lettura (1→2 / 2←1) e la scelta viene ricordata al riavvio.\nAnche la modalità di lettura (scroll / pagina / doppia) viene ricordata."
 }
