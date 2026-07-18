@@ -1,5 +1,5 @@
 {
-  "version": "1.2.5",
+  "version": "1.2.6",
   "binaryVersion": "1.2.0",
-  "notes": "Impostazioni ridisegnate: schede ordinate con descrizioni e interruttori.\nIcona Impostazioni più visibile nella barra in alto."
+  "notes": "Pagine a tutto schermo: i comandi ora sono in una barra laterale che si nasconde da sola e ricompare muovendo il mouse.\nNuovo schermo intero (⛶ o tasto F), valido per tutte e 3 le modalità di lettura."
 }

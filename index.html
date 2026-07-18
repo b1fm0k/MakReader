@@ -117,26 +117,33 @@
   /* reader */
   #reader{position:fixed;inset:0;background:var(--reader-bg);z-index:100;overflow-y:auto;display:none}
   #reader.light{background:#e9e6df}
-  .rtop{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(10,10,10,.85);backdrop-filter:blur(8px);border-bottom:1px solid #222}
-  #reader.light .rtop{background:rgba(233,230,223,.9);border-color:#cbc8c0;color:#222}
-  .rtop .rtitle{flex:1;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rhead{position:fixed;top:10px;left:12px;z-index:10;display:flex;align-items:center;gap:8px;max-width:72%;background:rgba(10,10,10,.72);backdrop-filter:blur(8px);padding:6px 10px;border:1px solid #222;border-radius:10px;transition:transform .25s ease,opacity .25s ease}
+  #reader.light .rhead{background:rgba(233,230,223,.9);border-color:#cbc8c0;color:#222}
+  .rhead .rtitle{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+  .rhead select{max-width:160px}
   .ricon{background:var(--panel2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:9px;font-size:16px}
   .ricon.rlbl{width:auto;min-width:38px;padding:0 9px;font-size:13px;font-weight:700;letter-spacing:.5px}
   .navicon,#quitTop{font-size:23px}
   .navicon.on{border-color:var(--accent);color:var(--accent)}
   #quitTop{flex:none}#quitTop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
   #reader.light .ricon{background:#fff;border-color:#cbc8c0;color:#222}
-  .pages{display:flex;flex-direction:column;align-items:center;padding-bottom:80px}
+  .pages{display:flex;flex-direction:column;align-items:center;padding-bottom:24px}
+  .pages:not(.paged){padding-top:16px}
   .pages img{max-width:760px;width:100%;display:block}
-  .pages.paged{height:calc(100vh - 60px);justify-content:center;padding:0}
-  .pages.paged img{max-height:calc(100vh - 80px);width:auto;max-width:100%;object-fit:contain;display:none}
+  .pages.paged{height:100vh;justify-content:center;padding:0}
+  .pages.paged img{max-height:100vh;width:auto;max-width:100%;object-fit:contain;display:none}
   .pages.paged img.cur{display:block}
   .pages.paged.dbl{flex-direction:row;align-items:center;justify-content:center}
   .pages.paged.dbl.rtl{flex-direction:row-reverse}
   .pages.paged.dbl img.cur{max-width:50%}
-  .rnav{position:fixed;bottom:0;left:0;right:0;display:flex;gap:10px;justify-content:center;align-items:center;padding:12px;background:rgba(10,10,10,.85);backdrop-filter:blur(8px);border-top:1px solid #222}
-  #reader.light .rnav{background:rgba(233,230,223,.9);border-color:#cbc8c0}
-  .rnav .pgi{font-size:13px;color:var(--muted);min-width:80px;text-align:center}
+  .rside{position:fixed;top:50%;right:10px;transform:translateY(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 8px;background:rgba(10,10,10,.82);backdrop-filter:blur(8px);border:1px solid #222;border-radius:14px;transition:transform .25s ease,opacity .25s ease}
+  #reader.light .rside{background:rgba(233,230,223,.92);border-color:#cbc8c0;color:#222}
+  .rside .sep{width:24px;height:1px;background:#333;margin:2px 0}
+  #reader.light .rside .sep{background:#cbc8c0}
+  .rside .pgi{font-size:11px;color:var(--muted);text-align:center;line-height:1.35;min-width:42px}
+  #reader.chromehide .rside{transform:translateY(-50%) translateX(135%);opacity:0;pointer-events:none}
+  #reader.chromehide .rhead{opacity:0;transform:translateX(-8px)}
+  #reader.chromehide{cursor:none}
   .loading{text-align:center;color:var(--muted);padding:50px}
   .spin{display:inline-block;width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -171,7 +178,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.2.5</span>
+    <span class="vertag" title="Versione installata">v1.2.6</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -204,21 +211,24 @@
 </main>
 
 <div id="reader">
-  <div class="rtop">
-    <button class="ricon" id="rClose">✕</button>
+  <div class="rhead">
     <div class="rtitle" id="rTitle"></div>
-    <select id="rChap" title="Vai al capitolo" style="max-width:150px"></select>
+    <select id="rChap" title="Vai al capitolo"></select>
+  </div>
+  <div class="pages" id="rPages"></div>
+  <div class="rside">
+    <button class="ricon" id="rClose" title="Chiudi">✕</button>
+    <div class="sep"></div>
     <button class="ricon" id="rDl" title="Scarica capitolo">⬇</button>
     <button class="ricon" id="rWidth" title="Larghezza pagina">↔</button>
     <button class="ricon rlbl" id="rDir" title="Direzione di lettura">1→2</button>
     <button class="ricon rlbl" id="rMode" title="Modalità di lettura">⇅</button>
+    <button class="ricon" id="rFull" title="Schermo intero (F)">⛶</button>
     <button class="ricon" id="rLight" title="Giorno / Notte">◐</button>
-  </div>
-  <div class="pages" id="rPages"></div>
-  <div class="rnav">
-    <button class="btn sec" id="rPrev">‹ Prec</button>
+    <div class="sep"></div>
+    <button class="ricon" id="rPrev" title="Precedente">‹</button>
     <span class="pgi" id="rPgi"></span>
-    <button class="btn sec" id="rNext">Succ ›</button>
+    <button class="ricon" id="rNext" title="Successiva">›</button>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -1183,6 +1193,7 @@ function renderPages(){
     im.complete?chk():im.addEventListener("load",chk);
   });
   if(reader.paged)pg.onclick=e=>{const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl'&&SET.navFlip!==false)?!right:right)?nextPage():prevPage();};else pg.onclick=null;
+  showChrome();
   applyPageVis();if(reader.paged)preload();
 }
 // gruppi di pagine visibili insieme: [i] singole, [i,i+1] coppie in modalità doppia
@@ -1222,6 +1233,8 @@ function recordHistory(ch){const k=reader.key;DB.history=DB.history.filter(h=>ke
 function updateDlBtn(){const b=$("#rDl");if(reader.offline){b.textContent="✓";b.title="Capitolo scaricato";}else{b.textContent="⬇";b.title="Scarica questo capitolo";}}
 
 $("#rClose").onclick=()=>{
+  if(document.fullscreenElement)(document.exitFullscreen||document.webkitExitFullscreen).call(document);
+  clearTimeout(chromeT);$("#reader").classList.remove("chromehide");
   $("#reader").style.display="none";
   if(reader.source&&reader.key){openDetail(reader.source,reader.key.split("||").slice(1).join("||"));return;}
   const at=document.querySelector(".tab.active");showTab(at?at.dataset.tab:"library");
@@ -1241,6 +1254,22 @@ $("#rMode").onclick=()=>{
   toast("Modalità: "+MODE_INFO[readerMode][1]);
 };
 $("#rLight").onclick=()=>$("#reader").classList.toggle("light");
+function toggleFull(){
+  const el=$("#reader");
+  if(document.fullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document);}
+  else{const rq=el.requestFullscreen||el.webkitRequestFullscreen;if(rq)rq.call(el).catch(()=>toast("Schermo intero non disponibile"));else toast("Schermo intero non supportato");}
+}
+function updateFullBtn(){const b=$("#rFull");if(!b)return;const on=!!document.fullscreenElement;b.textContent=on?"⛗":"⛶";b.title=on?"Esci da schermo intero (F)":"Schermo intero (F)";}
+$("#rFull").onclick=toggleFull;
+document.addEventListener("fullscreenchange",updateFullBtn);
+document.addEventListener("webkitfullscreenchange",updateFullBtn);
+// auto-nascondi barre del lettore
+let chromeT, chromeLock=false;
+function scheduleHide(){clearTimeout(chromeT);chromeT=setTimeout(()=>{if(!chromeLock&&$("#reader").style.display==="block")$("#reader").classList.add("chromehide");},2600);}
+function showChrome(){$("#reader").classList.remove("chromehide");scheduleHide();}
+$("#reader").addEventListener("mousemove",showChrome);
+$("#reader").addEventListener("touchstart",showChrome,{passive:true});
+[".rside",".rhead"].forEach(sel=>{const el=document.querySelector(sel);el.addEventListener("mouseenter",()=>{chromeLock=true;clearTimeout(chromeT);$("#reader").classList.remove("chromehide");});el.addEventListener("mouseleave",()=>{chromeLock=false;scheduleHide();});});
 $("#rChap").onchange=e=>{reader.idx=+e.target.value;loadChapter();};
 $("#rDir").onclick=()=>{SET.dir=SET.dir==="rtl"?"ltr":"rtl";saveSettings();updateDirBtn();applyPageVis();toast(SET.dir==="rtl"?"Direzione: destra → sinistra (manga)":"Direzione: sinistra → destra");};
 $("#rWidth").onclick=()=>{const o=["S","M","L"];SET.width=o[(o.indexOf(SET.width)+1)%3];saveSettings();renderPages();toast("Larghezza: "+SET.width);};
@@ -1249,7 +1278,8 @@ $("#reader").addEventListener("scroll",()=>{if($("#reader").style.display!=="blo
 document.addEventListener("keydown",e=>{if($("#reader").style.display!=="block")return;
   const fwd=e.key==="ArrowRight",back=e.key==="ArrowLeft";
   if(fwd||back){const goNext=(SET.dir==="rtl"&&SET.navFlip!==false)?back:fwd;reader.paged?(goNext?nextPage():prevPage()):(goNext?nextChapter():prevChapter());}
-  if(e.key==="Escape")$("#rClose").click();});
+  if(e.key==="f"||e.key==="F")toggleFull();
+  if(e.key==="Escape"){if(document.fullscreenElement)return;$("#rClose").click();}});
 
 // ---------- download offline ----------
 let DLITEMS=[],DLSET=new Set();
