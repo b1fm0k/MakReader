@@ -178,7 +178,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.2.9</span>
+    <span class="vertag" title="Versione installata">v1.2.10</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -267,7 +267,10 @@ const img=(u,ref)=>"/img?url="+encodeURIComponent(u)+(ref?"&ref="+encodeURICompo
 const metaOf=id=>META.find(m=>m.id===id)||{name:id};
 const srcRef=src=>(metaOf(src).base||'')+'/';   // Referer corretto per le immagini = sito sorgente
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600);}
-function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+// Nota: converte SEMPRE in stringa. Le API restituiscono anche numeri (es. l'anno
+// di MangaDex arriva come 2022, non "2022") e su un numero .replace() non esiste:
+// l'eccezione interrompeva il disegno della scheda lasciandola a caricare all'infinito.
+function esc(s){return(s===null||s===undefined?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 async function jget(u){const r=await fetch(u);const d=await r.json();if(d&&d.error)throw new Error(d.error);return d;}
 let dataLoaded=false;
 async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
@@ -555,7 +558,11 @@ async function openDetail(src,id,known){
   let d;
   try{d=await jget(`/details?source=${encodeURIComponent(src)}&url=${encodeURIComponent(id)}`);}
   catch(e){v.innerHTML=`<div class="errbox">Impossibile aprire la scheda: ${esc(e.message)}</div>`;return;}
-  await loadDownloads();
+  // rete di sicurezza: da qui in poi il codice non era protetto, e una qualsiasi
+  // eccezione lasciava la scheda a girare all'infinito senza dire niente.
+  if(!d||typeof d!=="object"){v.innerHTML='<div class="errbox">Risposta non valida dalla sorgente.</div>';return;}
+  if(!Array.isArray(d.chapters))d.chapters=[];
+  try{await loadDownloads();}catch(e){/* i download non devono bloccare la scheda */}
   const k=key(src,id),f=DB.follows[k],followed=!!f;
   const cover=d.cover||(known&&known.cover)||"";
   const refHost=srcRef(src);

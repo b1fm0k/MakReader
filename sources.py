@@ -619,18 +619,27 @@ class MangaDex(Source):
                     authors.append(nm)
         genres = [tg["attributes"]["name"].get("en", "") for tg in a.get("tags", [])
                   if tg.get("attributes", {}).get("group") in ("genre", "theme")]
-        chapters, off = [], 0
-        while True:
-            feed = json.loads(http_get(
-                "%s/manga/%s/feed?translatedLanguage[]=%s&order[chapter]=asc&limit=100&offset=%d"
-                "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica"
-                % (self.base, manga_id, self.lang, off)))
-            for c in feed.get("data", []):
+        # Elenco capitoli paginato. Il ciclo è LIMITATO: 10000 è il tetto di
+        # offset dell'API, e un errore su una pagina non deve far fallire tutta
+        # la scheda se qualche capitolo l'abbiamo già (meglio parziale che nulla).
+        chapters, off, MAX_OFF = [], 0, 10000
+        while off < MAX_OFF:
+            try:
+                feed = json.loads(http_get(
+                    "%s/manga/%s/feed?translatedLanguage[]=%s&order[chapter]=asc&limit=100&offset=%d"
+                    "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica"
+                    % (self.base, manga_id, self.lang, off), timeout=15))
+            except Exception:
+                if chapters:
+                    break
+                raise
+            data = feed.get("data") or []
+            for c in data:
                 ca = c["attributes"]
                 chapters.append({"id": c["id"], "name": self.chlabel + " " + (ca.get("chapter") or "?"),
                                  "number": ca.get("chapter") or "", "vol": ca.get("volume") or ""})
             off += 100
-            if off >= feed.get("total", 0) or not feed.get("data"):
+            if not data or off >= feed.get("total", 0):
                 break
         alts = []
         for at in a.get("altTitles", []):
