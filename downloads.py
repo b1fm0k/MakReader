@@ -9,6 +9,7 @@ import re
 import json
 import time
 import queue
+import shutil
 import zipfile
 import hashlib
 import threading
@@ -140,22 +141,101 @@ class Manager:
             return None
         return p
 
+    def _safe_folder(self, k):
+        """Percorso della cartella di un capitolo, solo se la chiave è un id valido
+        (esadecimale prodotto da did()) e resta dentro downloads/."""
+        if not re.fullmatch(r"[0-9a-f]{6,64}", str(k or "")):
+            return None
+        p = os.path.normpath(os.path.join(self.dir, k))
+        return p if p.startswith(os.path.normpath(self.dir) + os.sep) else None
+
+    def folder_bytes(self, k):
+        folder = self._safe_folder(k)
+        if not folder:
+            return 0
+        tot = 0
+        try:
+            with os.scandir(folder) as it:
+                for e in it:
+                    if e.is_file():
+                        try:
+                            tot += e.stat().st_size
+                        except OSError:
+                            pass
+        except (FileNotFoundError, NotADirectoryError):
+            return 0
+        return tot
+
+    def usage(self):
+        """Spazio occupato per capitolo, più le cartelle 'orfane': presenti su disco
+        ma non nell'indice (residui di cancellazioni manuali o interrotte)."""
+        with self.lock:
+            reg = dict(self.reg)
+        per_item, total = {}, 0
+        for k in reg:
+            b = self.folder_bytes(k)
+            per_item[k] = b
+            total += b
+        orphans, orphan_bytes = [], 0
+        try:
+            with os.scandir(self.dir) as it:
+                for e in it:
+                    if e.is_dir() and e.name not in reg:
+                        orphan_bytes += self.folder_bytes(e.name)
+                        orphans.append(e.name)
+        except FileNotFoundError:
+            pass
+        return {"perItem": per_item, "total": total,
+                "orphans": orphans, "orphanBytes": orphan_bytes}
+
     def delete(self, k):
         with self.lock:
             it = self.reg.pop(k, None)
             self._save()
-        if it:
-            folder = os.path.join(self.dir, k)
+        folder = self._safe_folder(k)
+        if folder and os.path.isdir(folder):
+            # rimuove l'intera cartella: così spariscono anche i file di un
+            # download interrotto, che non compaiono in it["files"]
             try:
-                for f in it.get("files", []):
-                    fp = os.path.join(folder, f)
-                    if os.path.exists(fp):
-                        os.remove(fp)
-                if os.path.isdir(folder):
-                    os.rmdir(folder)
+                shutil.rmtree(folder)
             except Exception:
                 pass
-        return True
+        return bool(it)
+
+    def delete_many(self, ids):
+        """Elimina più capitoli. Ritorna (quanti, byte liberati)."""
+        freed, n = 0, 0
+        for k in list(ids or []):
+            b = self.folder_bytes(k)
+            if self.delete(k):
+                n += 1
+                freed += b
+        return n, freed
+
+    def delete_orphan_folders(self):
+        """Rimuove le cartelle non presenti nell'indice. Non tocca nulla di
+        registrato: sono file che l'app non sa più di avere."""
+        with self.lock:
+            known = set(self.reg)
+        try:
+            entries = list(os.scandir(self.dir))
+        except FileNotFoundError:
+            return 0, 0
+        n, freed = 0, 0
+        for e in entries:
+            if not e.is_dir() or e.name in known:
+                continue
+            folder = self._safe_folder(e.name)
+            if not folder:
+                continue
+            b = self.folder_bytes(e.name)
+            try:
+                shutil.rmtree(folder)
+                n += 1
+                freed += b
+            except Exception:
+                pass
+        return n, freed
 
 
 # ============================================================
@@ -208,6 +288,45 @@ class ExportManager:
                     os.remove(os.path.join(self.dir, f))
                 except Exception:
                     pass
+
+    def usage(self):
+        """Byte occupati dagli ZIP ancora presenti (sono copie temporanee)."""
+        tot, n = 0, 0
+        try:
+            with os.scandir(self.dir) as it:
+                for e in it:
+                    if e.is_file() and e.name.endswith(".zip"):
+                        try:
+                            tot += e.stat().st_size
+                            n += 1
+                        except OSError:
+                            pass
+        except FileNotFoundError:
+            pass
+        return {"bytes": tot, "count": n}
+
+    def clear(self):
+        """Cancella gli ZIP già pronti (si rigenerano al bisogno)."""
+        freed, n = 0, 0
+        try:
+            entries = list(os.scandir(self.dir))
+        except FileNotFoundError:
+            return 0, 0
+        for e in entries:
+            if not (e.is_file() and e.name.endswith(".zip")):
+                continue
+            try:
+                sz = e.stat().st_size
+                os.remove(e.path)
+                freed += sz
+                n += 1
+            except Exception:
+                pass
+        with self.lock:
+            for j in self.jobs.values():
+                if j.get("status") == "done" and j.get("file") and not os.path.exists(j["file"]):
+                    j["status"] = "gone"
+        return n, freed
 
     def start(self, title, chapters, source=""):
         jid = hashlib.sha1((str(title) + str(time.time())).encode("utf-8")).hexdigest()[:12]

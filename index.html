@@ -178,7 +178,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.2.10</span>
+    <span class="vertag" title="Versione installata">v1.3.0</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -402,6 +402,25 @@ function renderSettings(){
      </div>
    </div>
 
+   <div class="setcard"><h4>Spazio su disco</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Cosa occupa MakReader</div><div class="d" id="stoDesc">Calcolo in corso…</div></div>
+       <button class="btn sec" id="stoRefresh">Ricalcola</button>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">Capitoli scaricati</div><div class="d">Gestisci i download offline: vedi quanto occupa ogni manga ed elimina quelli che non ti servono.</div></div>
+       <button class="btn sec" id="stoDl">Gestisci download</button>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">Memoria informazioni manga</div><div class="d" id="stoCacheDesc">Dati di MyAnimeList già scaricati, così l'app non li richiede ogni volta. Svuotarla non perde nulla: si ricostruisce da sola.</div></div>
+       <button class="btn sec" id="stoCache">Svuota</button>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">File ZIP delle esportazioni</div><div class="d" id="stoZipDesc">Copie temporanee create con "Esporta ZIP". Si cancellano da sole al riavvio dell'app.</div></div>
+       <button class="btn sec" id="stoZip">Cancella ora</button>
+     </div>
+   </div>
+
    <div class="setcard"><h4>Applicazione</h4>
      <div class="setrow">
        <div class="sl"><div class="t">Backup della libreria</div><div class="d">Per sicurezza o per spostarla su un altro computer.</div></div>
@@ -423,6 +442,40 @@ function renderSettings(){
   };
   $("#setHours").onchange=e=>{SET.autoHours=parseInt(e.target.value);DB.settings=SET;saveDB();scheduleAuto();};
   const sn=$("#setName");if(sn)sn.onchange=e=>{SET.name=e.target.value.trim();DB.settings=SET;saveDB();toast("Nome salvato");};
+  // --- spazio su disco ---
+  async function dipingiSpazio(){
+    const d=$("#stoDesc");if(!d)return;
+    d.textContent="Calcolo in corso…";
+    const s=await loadStorage();
+    if(!s){d.textContent="Non riesco a calcolare lo spazio occupato.";return;}
+    const voci=[];
+    if(s.downloads&&s.downloads.bytes)voci.push(`capitoli scaricati ${fmtBytes(s.downloads.bytes)}`);
+    if(s.malCache&&s.malCache.bytes)voci.push(`informazioni manga ${fmtBytes(s.malCache.bytes)}`);
+    if(s.exports&&s.exports.bytes)voci.push(`ZIP ${fmtBytes(s.exports.bytes)}`);
+    if(s.orphanFiles&&s.orphanFiles.bytes)voci.push(`file residui ${fmtBytes(s.orphanFiles.bytes)}`);
+    if(s.library&&s.library.bytes)voci.push(`libreria ${fmtBytes(s.library.bytes)}`);
+    d.innerHTML=`In totale <b>${fmtBytes(s.total)}</b>${voci.length?": "+esc(voci.join(", ")):""}.`+
+      `<br>Tutto dentro la cartella <span style="opacity:.8">${esc(s.dataDir||"MakReader-dati")}</span>, fuori dall'app: aggiornare o spostare MakReader non tocca questi file.`;
+    const c=$("#stoCacheDesc");
+    if(c&&s.malCache)c.innerHTML=`${s.malCache.entries} schede in memoria, ${fmtBytes(s.malCache.bytes)}. Servono a non richiedere ogni volta gli stessi dati a MyAnimeList. Svuotarla non perde nulla: si ricostruisce da sola.`;
+    const z=$("#stoZipDesc");
+    if(z&&s.exports)z.innerHTML=s.exports.count?`${s.exports.count} file per ${fmtBytes(s.exports.bytes)}. Sono copie temporanee: si cancellano da sole al riavvio dell'app.`:`Nessun file da cancellare. Le copie create con "Esporta ZIP" si cancellano da sole al riavvio.`;
+  }
+  dipingiSpazio();
+  const stoR=$("#stoRefresh");if(stoR)stoR.onclick=dipingiSpazio;
+  const stoD=$("#stoDl");if(stoD)stoD.onclick=openDownloadsModal;
+  const stoC=$("#stoCache");if(stoC)stoC.onclick=async()=>{
+    const n=(STORAGE&&STORAGE.malCache)?STORAGE.malCache.entries:0;
+    if(!confirm(`Svuotare la memoria delle informazioni manga (${n} schede)?\n\nNon perdi nulla della libreria: i dati verranno riscaricati quando servono.`))return;
+    const r=await fetch("/cache/clear",{method:"POST"});const d=await r.json();
+    toast(d.error?("Errore: "+d.error):("Memoria svuotata · "+fmtBytes(d.freed)+" liberati"));
+    dipingiSpazio();
+  };
+  const stoZ=$("#stoZip");if(stoZ)stoZ.onclick=async()=>{
+    const r=await fetch("/exports/clear",{method:"POST"});const d=await r.json();
+    toast(d.error?("Errore: "+d.error):(d.deleted?("Cancellati "+d.deleted+" ZIP · "+fmtBytes(d.freed)+" liberati"):"Nessuno ZIP da cancellare"));
+    dipingiSpazio();
+  };
   const mc=$("#setMalCid");if(mc)mc.onchange=e=>{
     SET.malClientId=e.target.value.trim();DB.settings=SET;saveDB();
     toast(SET.malClientId?"Client ID salvato ✓ ora si usa l'API ufficiale MAL":"Client ID rimosso: si torna a Jikan");
@@ -1326,22 +1379,73 @@ document.addEventListener("keydown",e=>{if($("#reader").style.display!=="block")
 let DLITEMS=[],DLSET=new Set();
 async function loadDownloads(){try{const d=await jget("/downloads");DLITEMS=d.items||[];DLSET=new Set(DLITEMS.filter(i=>i.status==="done").map(i=>i.source+"::"+i.chapter_id));}catch(e){}}
 async function downloadChapters(items){await fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(items)});await loadDownloads();updateDlBadge();ensureActivityPoll();}
+function fmtBytes(b){
+  b=Number(b)||0;
+  if(b<1024)return b+" B";
+  if(b<1048576)return (b/1024).toFixed(0)+" KB";
+  if(b<1073741824)return (b/1048576).toFixed(1)+" MB";
+  return (b/1073741824).toFixed(2)+" GB";
+}
+let STORAGE=null;
+async function loadStorage(){try{STORAGE=await jget("/storage");}catch(e){STORAGE=null;}return STORAGE;}
+async function purgeDownloads(body,domanda){
+  if(domanda&&!confirm(domanda))return null;
+  const r=await fetch("/downloads/purge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(d.error){toast("Errore: "+d.error);return null;}
+  toast(d.deleted?("Eliminati "+d.deleted+" capitoli · "+fmtBytes(d.freed)+" liberati"):"Niente da eliminare");
+  await loadDownloads();updateDlBadge();
+  return d;
+}
 function openDownloadsModal(){
-  loadDownloads().then(()=>{
+  Promise.all([loadDownloads(),loadStorage()]).then(()=>{
     const box=$("#importBox");
-    const sorted=[...DLITEMS].sort((a,b)=>(b.ts||0)-(a.ts||0));
-    const expSec=EXPORTS.length?`<h2 style="font-size:16px">Esportazioni ZIP</h2><div id="expRows" style="max-height:26vh;overflow:auto;margin-bottom:14px"></div>`:'';
-    box.innerHTML=`${expSec}<h2>Download offline</h2><p class="sub">${sorted.filter(i=>i.status==='done').length} capitoli scaricati. I capitoli scaricati si leggono senza connessione.</p>
-      <div style="max-height:48vh;overflow:auto">${sorted.length?sorted.map(i=>{
-        const st=i.status==="done"?`<span style="color:var(--good)">✓ scaricato</span>`:i.status==="downloading"?`scarico ${i.done}/${i.total}`:i.status==="error"?`<span style="color:var(--warn)">errore</span>`:"in coda";
-        return `<div class="srcrow"><div class="info"><div class="nm" style="font-size:14px">${esc(i.title||"?")}</div><div class="nt">${esc(i.chapter_name||"")} · ${esc(metaOf(i.source).name)} · ${st}</div></div><button class="ricon" data-del="${i.id}" title="Elimina">🗑</button></div>`;
+    const s=STORAGE||{};
+    const dl=s.downloads||{bytes:0,chapters:0,groups:[]};
+    const groups=dl.groups||[];
+    const inCorso=DLITEMS.filter(i=>i.status!=="done");
+    const expSec=EXPORTS.length?`<h2 style="font-size:16px">Esportazioni ZIP</h2><div id="expRows" style="max-height:20vh;overflow:auto;margin-bottom:14px"></div>`:'';
+    // riepilogo in testa: quanto occupano i download e quanto si può recuperare
+    const recuperabile=[];
+    if(s.readChapters)recuperabile.push(`<button class="btn sec" id="pgRead" style="padding:5px 11px">Elimina già letti (${s.readChapters} · ${fmtBytes(s.readBytes)})</button>`);
+    if(s.notInLibrary&&s.notInLibrary.chapters)recuperabile.push(`<button class="btn sec" id="pgNoLib" style="padding:5px 11px">Non più in libreria (${s.notInLibrary.chapters} · ${fmtBytes(s.notInLibrary.bytes)})</button>`);
+    if(s.orphanFiles&&s.orphanFiles.folders)recuperabile.push(`<button class="btn sec" id="pgOrph" style="padding:5px 11px">File residui (${fmtBytes(s.orphanFiles.bytes)})</button>`);
+    const err=DLITEMS.filter(i=>i.status==="error").length;
+    if(err)recuperabile.push(`<button class="btn sec" id="pgErr" style="padding:5px 11px">Download falliti (${err})</button>`);
+
+    box.innerHTML=`${expSec}<h2>Download offline</h2>
+      <p class="sub">${dl.chapters} capitoli occupano <b>${fmtBytes(dl.bytes)}</b>. Si leggono senza connessione.</p>
+      ${recuperabile.length?`<div style="display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 14px">${recuperabile.join("")}</div>`:''}
+      ${inCorso.length?`<div class="sub" style="margin-bottom:8px">In corso: ${inCorso.map(i=>esc(i.title||"?")+" "+(i.status==="downloading"?`(${i.done}/${i.total})`:i.status==="error"?"— errore":"— in coda")).join(" · ")}</div>`:''}
+      <div style="max-height:44vh;overflow:auto">${groups.length?groups.map(g=>{
+        const letti=g.readChapters?` · ${g.readChapters} già letti`:"";
+        const fuori=g.inLibrary?"":' · <span style="color:var(--warn)">non in libreria</span>';
+        return `<div class="srcrow"><div class="info">
+            <div class="nm" style="font-size:14px">${esc(g.title)}</div>
+            <div class="nt">${g.chapters} capitoli · ${esc(metaOf(g.source).name)}${letti}${fuori}</div>
+          </div>
+          <div style="font-size:13px;color:var(--muted);margin-right:10px;white-space:nowrap">${fmtBytes(g.bytes)}</div>
+          <button class="ricon" data-delmanga="${esc(g.mangaKey)}" title="Elimina i capitoli di questo manga">🗑</button></div>`;
       }).join(""):'<div class="empty">Nessun download.</div>'}</div>
-      <div class="row"><button class="btn sec" id="dlRefresh">Aggiorna</button><button class="btn" id="dlClose">Chiudi</button></div>`;
+      <div class="row">
+        ${dl.chapters?'<button class="btn sec" id="pgAll" style="margin-right:auto">Elimina tutto</button>':''}
+        <button class="btn sec" id="dlRefresh">Aggiorna</button><button class="btn" id="dlClose">Chiudi</button></div>`;
     renderExpRows();
     $("#importModal").classList.remove("hidden");
     $("#dlClose").onclick=()=>$("#importModal").classList.add("hidden");
     $("#dlRefresh").onclick=openDownloadsModal;
-    box.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{await fetch("/download/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:b.dataset.del})});openDownloadsModal();});
+    const rifai=async()=>openDownloadsModal();
+    box.querySelectorAll("[data-delmanga]").forEach(b=>b.onclick=async()=>{
+      const g=groups.find(x=>x.mangaKey===b.dataset.delmanga);if(!g)return;
+      if(await purgeDownloads({mode:"manga",mangaKey:g.mangaKey},
+        `Eliminare i ${g.chapters} capitoli scaricati di "${g.title}"?\n\nLibererai ${fmtBytes(g.bytes)}. Restano leggibili online.`))rifai();
+    });
+    const bind=(id,body,dom)=>{const el=$("#"+id);if(el)el.onclick=async()=>{if(await purgeDownloads(body,dom))rifai();};};
+    bind("pgRead",{mode:"read"},`Eliminare i ${s.readChapters} capitoli già letti?\n\nLibererai ${fmtBytes(s.readBytes)}. I progressi di lettura NON vengono toccati.`);
+    bind("pgNoLib",{mode:"notinlibrary"},`Eliminare i capitoli dei manga non più in libreria?\n\nLibererai ${fmtBytes(s.notInLibrary&&s.notInLibrary.bytes)}.`);
+    bind("pgOrph",{mode:"orphanfiles"},`Rimuovere i file residui che l'app non riconosce più?\n\nLibererai ${fmtBytes(s.orphanFiles&&s.orphanFiles.bytes)}. Non tocca i capitoli scaricati.`);
+    bind("pgErr",{mode:"errors"},"Rimuovere dall'elenco i download falliti?");
+    bind("pgAll",{mode:"all"},`Eliminare TUTTI i ${dl.chapters} capitoli scaricati?\n\nLibererai ${fmtBytes(dl.bytes)}. Restano leggibili online.`);
   });
 }
 

@@ -24,7 +24,7 @@ import urllib.error
 # Versione del BINARIO (questo file non si auto-aggiorna).
 # Va tenuta allineata a "binaryVersion" di version.json a ogni release che
 # tocca mangareader.py, altrimenti l'app continua a chiedere di riscaricarsi.
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -659,6 +659,68 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"items": DL.status()})
             return
 
+        if path == "/storage":
+            # riepilogo dello spazio occupato in ~/MakReader-dati
+            try:
+                def fsize(p):
+                    try:
+                        return os.path.getsize(p)
+                    except OSError:
+                        return 0
+                u = DL.usage()
+                items = DL.status()
+                data = load_data()
+                follows = data.get("follows") or {}
+                progress = data.get("progress") or {}
+                letti = set()
+                for k, pr in progress.items():
+                    for cid in (pr.get("readChapters") or []):
+                        letti.add(str(cid))
+                # raggruppa per manga: quanto occupa ciascuno e quanto è già letto
+                gruppi = {}
+                for it in items:
+                    k = it.get("id")
+                    b = u["perItem"].get(k, 0)
+                    mk = it.get("manga_key") or ""
+                    g = gruppi.setdefault(mk, {"mangaKey": mk, "title": it.get("title") or "?",
+                                               "source": it.get("source") or "",
+                                               "chapters": 0, "bytes": 0,
+                                               "readChapters": 0, "readBytes": 0,
+                                               "inLibrary": mk in follows})
+                    g["chapters"] += 1
+                    g["bytes"] += b
+                    if str(it.get("chapter_id")) in letti:
+                        g["readChapters"] += 1
+                        g["readBytes"] += b
+                orfani_lib = [g for g in gruppi.values() if not g["inLibrary"]]
+                cache_entries = 0
+                try:
+                    with _MAL_CACHE_LOCK:
+                        cache_entries = len(_mal_cache())
+                except Exception:
+                    pass
+                exp = EXPORT.usage()
+                self._json({
+                    "dataDir": DATA_DIR,
+                    "library": {"bytes": fsize(DATA_FILE) + fsize(DATA_FILE + ".bak"),
+                                "manga": len(follows)},
+                    "malCache": {"bytes": fsize(MAL_CACHE_FILE), "entries": cache_entries},
+                    "downloads": {"bytes": u["total"], "chapters": len(items),
+                                  "groups": sorted(gruppi.values(),
+                                                   key=lambda g: g["bytes"], reverse=True)},
+                    "readBytes": sum(g["readBytes"] for g in gruppi.values()),
+                    "readChapters": sum(g["readChapters"] for g in gruppi.values()),
+                    "notInLibrary": {"bytes": sum(g["bytes"] for g in orfani_lib),
+                                     "chapters": sum(g["chapters"] for g in orfani_lib)},
+                    "orphanFiles": {"bytes": u["orphanBytes"], "folders": len(u["orphans"])},
+                    "exports": {"bytes": exp["bytes"], "count": exp["count"]},
+                    "total": (u["total"] + u["orphanBytes"] + exp["bytes"]
+                              + fsize(DATA_FILE) + fsize(DATA_FILE + ".bak") + fsize(MAL_CACHE_FILE)),
+                })
+            except Exception as e:
+                self._json({"error": str(e)}, 500)
+            return
+
         if path == "/file":
             fid = q.get("id", [""])[0]
             n = int(q.get("n", ["0"])[0])
@@ -838,6 +900,75 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 DL.delete(json.loads(raw).get("id"))
                 self._json({"ok": True})
+            except Exception as e:
+                self._json({"error": str(e)}, 400)
+            return
+        if p.path == "/downloads/purge":
+            # cancellazioni in blocco. La modalità è SEMPRE esplicita: nessuna
+            # scorciatoia che possa cancellare più di quanto l'utente ha chiesto.
+            try:
+                body = json.loads(raw) if raw else {}
+                mode = str(body.get("mode") or "")
+                items = DL.status()
+                data = load_data()
+                follows = data.get("follows") or {}
+                letti = set()
+                for k, pr in (data.get("progress") or {}).items():
+                    for cid in (pr.get("readChapters") or []):
+                        letti.add(str(cid))
+                ids, n_orf, freed_orf = [], 0, 0
+                if mode == "ids":
+                    voluti = set(str(x) for x in (body.get("ids") or []))
+                    ids = [it["id"] for it in items if it["id"] in voluti]
+                elif mode == "manga":
+                    mk = str(body.get("mangaKey") or "")
+                    if not mk:
+                        self._json({"error": "manga non indicato"}, 400)
+                        return
+                    ids = [it["id"] for it in items if (it.get("manga_key") or "") == mk]
+                elif mode == "read":
+                    ids = [it["id"] for it in items if str(it.get("chapter_id")) in letti]
+                elif mode == "notinlibrary":
+                    ids = [it["id"] for it in items if (it.get("manga_key") or "") not in follows]
+                elif mode == "errors":
+                    ids = [it["id"] for it in items if it.get("status") == "error"]
+                elif mode == "all":
+                    ids = [it["id"] for it in items]
+                elif mode == "orphanfiles":
+                    n_orf, freed_orf = DL.delete_orphan_folders()
+                else:
+                    self._json({"error": "modalità non valida"}, 400)
+                    return
+                n, freed = DL.delete_many(ids)
+                self._json({"ok": True, "deleted": n + n_orf, "freed": freed + freed_orf})
+            except Exception as e:
+                self._json({"error": str(e)}, 400)
+            return
+        if p.path == "/exports/clear":
+            try:
+                n, freed = EXPORT.clear()
+                self._json({"ok": True, "deleted": n, "freed": freed})
+            except Exception as e:
+                self._json({"error": str(e)}, 400)
+            return
+        if p.path == "/cache/clear":
+            # svuota la cache metadati: si ricostruisce da sola alla prossima apertura
+            global _MAL_CACHE, _MAL_CACHE_DIRTY
+            try:
+                freed = 0
+                try:
+                    freed = os.path.getsize(MAL_CACHE_FILE)
+                except OSError:
+                    pass
+                with _MAL_CACHE_LOCK:
+                    _MAL_CACHE = {}
+                    _MAL_CACHE_DIRTY = False
+                    try:
+                        if os.path.exists(MAL_CACHE_FILE):
+                            os.remove(MAL_CACHE_FILE)
+                    except OSError:
+                        pass
+                self._json({"ok": True, "freed": freed})
             except Exception as e:
                 self._json({"error": str(e)}, 400)
             return

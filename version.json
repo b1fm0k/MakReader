@@ -1,5 +1,5 @@
 {
-  "version": "1.2.10",
-  "binaryVersion": "1.2.2",
-  "notes": "Corretto un difetto per cui la scheda di alcuni manga restava a caricare all'infinito senza mostrare nulla.\nSe una scheda non si può aprire, ora compare un messaggio invece del caricamento infinito."
+  "version": "1.3.0",
+  "binaryVersion": "1.3.0",
+  "notes": "Nuova sezione \"Spazio su disco\" nelle Impostazioni: mostra quanto occupa MakReader e dove.\nLa finestra Download ora raggruppa per manga e indica lo spazio di ciascuno, con eliminazione per manga, dei capitoli già letti, di quelli non più in libreria e dei file residui."
 }
