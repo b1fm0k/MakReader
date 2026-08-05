@@ -21,7 +21,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 import urllib.error
 
-APP_VERSION = "1.2.0"
+# Versione del BINARIO (questo file non si auto-aggiorna).
+# Va tenuta allineata a "binaryVersion" di version.json a ogni release che
+# tocca mangareader.py, altrimenti l'app continua a chiedere di riscaricarsi.
+APP_VERSION = "1.2.2"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
