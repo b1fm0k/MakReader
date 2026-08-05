@@ -178,7 +178,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.2.6</span>
+    <span class="vertag" title="Versione installata">v1.2.9</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -392,6 +392,13 @@ function renderSettings(){
      </div>
    </div>
 
+   <div class="setcard"><h4>MyAnimeList</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Client ID (facoltativo)</div><div class="d">Senza, l'app usa il servizio pubblico Jikan, che ultimamente è spesso irraggiungibile (errori 504). Con un Client ID tuo, le informazioni arrivano dall'API ufficiale di MyAnimeList, molto più affidabile.<br>Si ottiene gratis in un minuto su <a href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a> → "Create ID": copia qui il campo <b>Client ID</b> (il Client Secret non serve).<br>Resta salvato solo sul tuo computer.</div></div>
+       <input id="setMalCid" placeholder="Incolla qui il Client ID" value="${esc(SET.malClientId||"")}" style="width:230px">
+     </div>
+   </div>
+
    <div class="setcard"><h4>Applicazione</h4>
      <div class="setrow">
        <div class="sl"><div class="t">Backup della libreria</div><div class="d">Per sicurezza o per spostarla su un altro computer.</div></div>
@@ -413,6 +420,10 @@ function renderSettings(){
   };
   $("#setHours").onchange=e=>{SET.autoHours=parseInt(e.target.value);DB.settings=SET;saveDB();scheduleAuto();};
   const sn=$("#setName");if(sn)sn.onchange=e=>{SET.name=e.target.value.trim();DB.settings=SET;saveDB();toast("Nome salvato");};
+  const mc=$("#setMalCid");if(mc)mc.onchange=e=>{
+    SET.malClientId=e.target.value.trim();DB.settings=SET;saveDB();
+    toast(SET.malClientId?"Client ID salvato ✓ ora si usa l'API ufficiale MAL":"Client ID rimosso: si torna a Jikan");
+  };
   const bb=$("#setBackup");if(bb)bb.onclick=exportLibrary;
   const rr=$("#setRestore");if(rr)rr.onclick=()=>$("#backupFile").click();
   $("#checkUpd").onclick=async()=>{
@@ -819,11 +830,16 @@ async function loadMal(id,title,k){
       const f=DB.follows[k];let ch=false;
       if(d.mal.mal_id&&!f.malId){f.malId=String(d.mal.mal_id);ch=true;}
       if(d.mal.genres&&f.genres===undefined){f.genres=d.mal.genres;ch=true;}
+      if(d.mal.genreIds&&f.genreIds===undefined){f.genreIds=d.mal.genreIds;ch=true;}
       if(ch)saveDB();
       // aggiorna dal vivo la riga generi della scheda con quelli di MAL
       if(f.genres&&f.genres.length){const gr=$("#genreRow");if(gr)gr.innerHTML=f.genres.map(g=>'<span class="tag">'+esc(g)+'</span>').join("");}
     }
-  }catch(e){c.innerHTML='<div class="malrow">Errore nel recupero da MAL: '+esc(e.message)+'</div>';}
+  }catch(e){
+    c.innerHTML='<div class="malrow">Errore nel recupero da MAL: '+esc(e.message)+'</div>'+
+      '<div style="margin-top:10px"><button class="btn sec" id="malRetry" style="padding:5px 11px">↻ Riprova</button></div>';
+    const rb=$("#malRetry");if(rb)rb.onclick=()=>loadMal(id,title,k);
+  }
   // correzione manuale dell'abbinamento (per i manga in libreria)
   if(k&&DB.follows[k]){
     const fb=document.createElement("div");fb.style.marginTop="10px";
@@ -842,11 +858,22 @@ async function fixMal(k,title){
   if(m)id=m[1];
   else if(/^\d{1,7}$/.test(s))id=s;  // solo un numero = ID del manga
   if(!id){toast("Link non valido. Incolla l'indirizzo della pagina MANGA su MyAnimeList, o il solo numero ID.");return;}
-  // verifica che l'ID esista DAVVERO come manga, prima di salvarlo
-  let d=null;try{d=await jget("/mal?id="+encodeURIComponent(id));}catch(e){}
-  if(!d||!d.found){toast("Nessun manga trovato con quell'ID su MyAnimeList. Controlla che sia un link MANGA.");return;}
+  // verifica che l'ID esista DAVVERO come manga, prima di salvarlo.
+  // Attenzione: un errore di rete NON significa "ID inesistente".
+  let d=null,netErr=null;
+  try{d=await jget("/mal?id="+encodeURIComponent(id));}
+  catch(e){netErr=e;}
+  if(netErr||(d&&d.failed)){
+    const msg=(d&&d.error)||(netErr&&netErr.message)||"servizio non raggiungibile";
+    toast("Impossibile verificare l'ID ora: "+msg);
+    if(confirm("Non riesco a contattare MyAnimeList per verificare l'ID "+id+".\n\n"+msg+"\n\nVuoi salvarlo lo stesso? Potrai ricaricare le info più tardi."))
+      { /* prosegue col salvataggio */ }
+    else return;
+  }else if(!d||!d.found){
+    toast("Nessun manga trovato con quell'ID su MyAnimeList. Controlla che sia un link MANGA.");return;
+  }
   const f=DB.follows[k];if(!f)return;
-  f.malId=id;f.genres=undefined;   // azzero i generi: verranno ripresi dal nuovo ID
+  f.malId=id;f.genres=undefined;f.genreIds=undefined;   // azzero: verranno ripresi dal nuovo ID
   await saveDB();
   await loadMal(id,title,k);       // ricarica il pannello col manga giusto e risalva
   toast("Collegamento MAL aggiornato ✓");
@@ -949,6 +976,7 @@ function renderLibrary(){
     '<details class="moremenu"><summary class="btn sec">⋯ Altro</summary><div class="morepop">'+
       '<button class="btn sec" id="importMal">⬇ Importa da MyAnimeList</button>'+
       '<button class="btn sec" id="genreScanMenu">🏷 Aggiorna generi (MAL)</button>'+
+      '<button class="btn sec" id="genreRescanMenu">♻ Ri-scarica tutti i generi</button>'+
       '<button class="btn sec" id="backupBtn">⤓ Backup</button>'+
       '<button class="btn sec" id="restoreBtn">⤒ Ripristina</button>'+
       (ids.length?`<button class="btn sec" id="clearLib">🗑 Svuota (${ids.length})</button>`:'')+
@@ -1058,7 +1086,13 @@ function renderLibrary(){
     if(cb.checked){if(!libGenres.includes(g))libGenres.push(g);}else libGenres=libGenres.filter(x=>x!==g);
     genreOpen=true;persistLib();renderLibrary();});
   const gClear=$("#genreClear");if(gClear)gClear.onclick=()=>{libGenres=[];genreOpen=true;persistLib();renderLibrary();};
-  const gScanM=$("#genreScanMenu");if(gScanM)gScanM.onclick=scanGenres;
+  const gScanM=$("#genreScanMenu");if(gScanM)gScanM.onclick=()=>scanGenres(false);
+  const gReM=$("#genreRescanMenu");if(gReM)gReM.onclick=()=>{
+    const n=Object.keys(DB.follows).length;
+    if(!n){toast("Libreria vuota");return;}
+    if(confirm("Ri-scaricare i generi da MyAnimeList per tutti i "+n+" manga?\n\nUtile se alcuni generi sono sbagliati, mancanti o incoerenti. I manga non raggiungibili restano invariati."))
+      scanGenres(true);
+  };
   bindLib(v);
 }
 function bindLib(v){
@@ -1344,14 +1378,20 @@ async function checkUpdatesManual(){
   toast("Aggiornamenti controllati");
 }
 let genreScanning=false;
-async function scanGenres(){
+async function scanGenres(force){
   if(genreScanning){toast("Scansione generi già in corso…");return;}
-  // tutti i manga non ancora scansionati (per ID se presente, altrimenti per titolo)
-  const todo=Object.keys(DB.follows).filter(k=>DB.follows[k].genres===undefined);
-  if(!todo.length){toast("Generi già scaricati per tutta la libreria ✓");return;}
+  // force = ri-scansiona TUTTO (serve per ri-allineare il vocabolario dei generi
+  // o per riparare manga rimasti senza generi per errori di rete)
+  const all=Object.keys(DB.follows);
+  const todo=force?all:all.filter(k=>DB.follows[k].genres===undefined);
+  if(!todo.length){
+    if(all.length&&confirm("Tutti i manga risultano già scansionati.\n\nVuoi ri-scaricare i generi per l'intera libreria ("+all.length+" manga)?\nServe se alcuni generi sono sbagliati o mancanti."))
+      return scanGenres(true);
+    toast(all.length?"Generi già scaricati per tutta la libreria ✓":"Libreria vuota");return;
+  }
   genreScanning=true;
   const gm=$("#genreScanMenu");const orig=gm?gm.textContent:"";
-  let done=0;const BATCH=20;
+  let done=0,okN=0,noneN=0,failN=0;const BATCH=20;
   try{
     for(let i=0;i<todo.length;i+=BATCH){
       if(gm)gm.textContent="Generi… "+done+"/"+todo.length;
@@ -1362,15 +1402,26 @@ async function scanGenres(){
         for(const it of chunk){
           const f=DB.follows[it.key];if(!f)continue;
           const got=res[it.key];
-          if(got){if(got.malId&&!f.malId)f.malId=got.malId;f.genres=got.genres||[];}
-          else f.genres=[];  // nessun risultato: segnato come scansionato (non riprovato)
+          if(got&&got.ok){
+            if(got.malId&&!f.malId)f.malId=got.malId;
+            f.genres=got.genres||[];
+            if(got.genreIds)f.genreIds=got.genreIds;   // ID stabili per i filtri futuri
+            okN++;
+          }else if(got&&got.notfound){
+            f.genres=[];f.genreIds=[];noneN++;          // davvero senza corrispondenza
+          }else{
+            failN++;   // errore: NON scrivo nulla, resta da ritentare
+          }
         }
         await saveDB();
-      }catch(e){/* blocco fallito: non segno, verrà ritentato a una nuova scansione */}
+      }catch(e){failN+=chunk.length;}
       done+=chunk.length;
     }
   }finally{genreScanning=false;if(gm)gm.textContent=orig;}
-  toast("Generi da MAL scaricati ✓");
+  let msg="Generi aggiornati: "+okN;
+  if(noneN)msg+=" · senza corrispondenza: "+noneN;
+  if(failN)msg+=" · non riusciti: "+failN+" (riprova più tardi)";
+  toast(msg);
   renderLibrary();
 }
 let autoTimer;

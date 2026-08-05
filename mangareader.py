@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 import xml.parsers.expat as expat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
+import urllib.error
 
 APP_VERSION = "1.2.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
@@ -139,18 +140,240 @@ def mal_genres(d):
     return out
 
 
-def mal_fetch(mid, title):
-    """Risolve una voce MAL per ID (se c'è) o per titolo. Ritorna i dati Jikan o None."""
-    mid = str(mid or "").strip()
+def mal_genre_ids(d):
+    """ID numerici dei generi MAL, nello stesso ordine di mal_genres().
+    Gli ID sono stabili nel tempo, i nomi no: servono per i filtri futuri."""
+    out = []
+    for key in ("genres", "themes", "demographics"):
+        for x in d.get(key, []):
+            i = x.get("mal_id")
+            if i and i not in out:
+                out.append(i)
+    return out
+
+
+def _jikan(url):
+    """GET su Jikan (ponte non ufficiale verso MyAnimeList) con errori leggibili.
+    Le riprove sugli errori transitori (incluso il 504) le fa sources.http_get."""
+    try:
+        return json.loads(sources.http_get(url, timeout=20))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}
+        if e.code in (502, 503, 504):
+            raise RuntimeError(
+                "MyAnimeList non risponde al momento (errore %d). Riprova tra qualche istante." % e.code) from None
+        if e.code == 429:
+            raise RuntimeError(
+                "Troppe richieste a MyAnimeList: attendi qualche secondo e riprova.") from None
+        raise RuntimeError("Errore da MyAnimeList (HTTP %d)." % e.code) from None
+    except (urllib.error.URLError, TimeoutError, socket.timeout):
+        raise RuntimeError(
+            "Impossibile contattare MyAnimeList. Controlla la connessione e riprova.") from None
+
+
+def _jikan_fetch(mid, title):
+    """Voce manga da Jikan: per ID se c'è, altrimenti per titolo. None = non trovato."""
     if mid:
-        return json.loads(sources.http_get(
-            "https://api.jikan.moe/v4/manga/" + urllib.parse.quote(mid))).get("data")
-    title = str(title or "").strip()
-    if not title:
-        return None
-    arr = json.loads(sources.http_get(
-        "https://api.jikan.moe/v4/manga?limit=1&q=" + urllib.parse.quote(title))).get("data") or []
+        return _jikan("https://api.jikan.moe/v4/manga/" + urllib.parse.quote(mid)).get("data") or None
+    arr = _jikan("https://api.jikan.moe/v4/manga?limit=1&q=" + urllib.parse.quote(title)).get("data") or []
     return arr[0] if arr else None
+
+
+# ---------- API ufficiale MyAnimeList (facoltativa, serve un Client ID) ----------
+MAL_V2 = "https://api.myanimelist.net/v2"
+MAL_FIELDS = ("id,title,synopsis,genres,num_volumes,num_chapters,status,start_date,end_date,"
+              "mean,media_type,alternative_titles,main_picture,authors{first_name,last_name},"
+              "serialization{name}")
+
+
+_CID_CACHE = {"v": None, "ts": 0.0}
+
+
+def _mal_client_id():
+    """Client ID salvato dall'utente nelle Impostazioni (mai nel repo).
+    Memorizzato per qualche secondo: durante una scansione evita di
+    rileggere library.json a ogni singolo manga."""
+    now = time.time()
+    if _CID_CACHE["v"] is not None and now - _CID_CACHE["ts"] < 10:
+        return _CID_CACHE["v"]
+    try:
+        v = str((load_data().get("settings") or {}).get("malClientId") or "").strip()
+    except Exception:
+        v = ""
+    _CID_CACHE["v"], _CID_CACHE["ts"] = v, now
+    return v
+
+
+def _mal_official_get(url, cid):
+    try:
+        return json.loads(sources.http_get(url, timeout=20, headers={"X-MAL-CLIENT-ID": cid}))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}
+        if e.code in (401, 403):
+            raise RuntimeError(
+                "Client ID di MyAnimeList non valido o non autorizzato: controllalo nelle Impostazioni.") from None
+        raise RuntimeError("Errore dall'API ufficiale MyAnimeList (HTTP %d)." % e.code) from None
+    except (urllib.error.URLError, TimeoutError, socket.timeout):
+        raise RuntimeError("Impossibile contattare l'API ufficiale di MyAnimeList.") from None
+
+
+def _mal_people(lst):
+    out = []
+    for x in lst or []:
+        n = x.get("node") or {}
+        nm = " ".join(p for p in (n.get("last_name"), n.get("first_name")) if p).strip() or n.get("name") or ""
+        if nm:
+            role = x.get("role") or ""
+            out.append({"name": nm + (" (%s)" % role if role else "")})
+    return out
+
+
+_MAL_STATUS = {"finished": "Finished", "currently_publishing": "Publishing",
+               "not_yet_published": "Not yet published", "on_hiatus": "On Hiatus",
+               "discontinued": "Discontinued"}
+
+
+def _mal_v2_to_jikan(d):
+    """Converte la risposta dell'API ufficiale nella stessa forma usata per Jikan,
+    così tutto il codice a valle (normalize_mal, mal_genres) resta invariato.
+    Nota: MAL v2 restituisce generi, temi e demografica in un unico elenco."""
+    alt = d.get("alternative_titles") or {}
+    sd, ed = d.get("start_date") or "", d.get("end_date") or ""
+    pub = (sd + (" to " + ed if ed else " to ?")) if sd else ""
+    pic = d.get("main_picture") or {}
+    return {
+        "mal_id": d.get("id"),
+        "url": "https://myanimelist.net/manga/%s" % (d.get("id") or ""),
+        "title": d.get("title") or "",
+        "title_english": alt.get("en") or "",
+        "title_japanese": alt.get("ja") or "",
+        "title_synonyms": alt.get("synonyms") or [],
+        "synopsis": d.get("synopsis") or "",
+        "type": (d.get("media_type") or "").replace("_", " ").title() or None,
+        "volumes": d.get("num_volumes") or None,
+        "chapters": d.get("num_chapters") or None,
+        "status": _MAL_STATUS.get(d.get("status") or "",
+                                  (d.get("status") or "").replace("_", " ").title()) or None,
+        "published": {"string": pub},
+        "score": d.get("mean"),
+        "genres": [{"mal_id": g.get("id"), "name": g.get("name")}
+                   for g in (d.get("genres") or []) if g.get("name")],
+        "themes": [], "demographics": [],
+        "authors": _mal_people(d.get("authors")),
+        "serializations": [{"name": (s.get("node") or {}).get("name", "")}
+                           for s in (d.get("serialization") or []) if (s.get("node") or {}).get("name")],
+        "images": {"jpg": {"image_url": pic.get("large") or pic.get("medium") or ""}},
+    }
+
+
+def _mal_official_fetch(mid, title, cid):
+    if mid:
+        d = _mal_official_get("%s/manga/%s?fields=%s" % (MAL_V2, urllib.parse.quote(mid), MAL_FIELDS), cid)
+        return _mal_v2_to_jikan(d) if d.get("id") else None
+    r = _mal_official_get("%s/manga?limit=1&q=%s&fields=%s"
+                          % (MAL_V2, urllib.parse.quote(title[:64]), MAL_FIELDS), cid)
+    arr = r.get("data") or []
+    node = (arr[0].get("node") if arr else None) or None
+    return _mal_v2_to_jikan(node) if node else None
+
+
+# ---------- cache locale dei metadati (diventa il catalogo offline) ----------
+MAL_CACHE_FILE = os.path.join(DATA_DIR, "mal-cache.json")
+MAL_CACHE_TTL = 30 * 24 * 3600      # i metadati cambiano di rado
+_MAL_CACHE = None
+_MAL_CACHE_DIRTY = False
+_MAL_CACHE_LOCK = threading.Lock()
+
+
+def _mal_cache():
+    global _MAL_CACHE
+    if _MAL_CACHE is None:
+        try:
+            with open(MAL_CACHE_FILE, "r", encoding="utf-8") as f:
+                c = json.load(f)
+            _MAL_CACHE = c if isinstance(c, dict) else {}
+        except Exception:
+            _MAL_CACHE = {}
+    return _MAL_CACHE
+
+
+def _mal_cache_get(key):
+    """Ritorna (dati, fresca). dati=None se assente."""
+    with _MAL_CACHE_LOCK:
+        e = _mal_cache().get(key)
+    if not isinstance(e, dict) or "data" not in e:
+        return None, False
+    return e["data"], (time.time() - float(e.get("ts") or 0)) < MAL_CACHE_TTL
+
+
+def _mal_cache_put(key, data):
+    global _MAL_CACHE_DIRTY
+    with _MAL_CACHE_LOCK:
+        _mal_cache()[key] = {"ts": time.time(), "data": data}
+        _MAL_CACHE_DIRTY = True
+
+
+def mal_cache_flush():
+    global _MAL_CACHE_DIRTY
+    with _MAL_CACHE_LOCK:
+        if not _MAL_CACHE_DIRTY or _MAL_CACHE is None:
+            return
+        try:
+            tmp = "%s.%d.tmp" % (MAL_CACHE_FILE, os.getpid())
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(_MAL_CACHE, f, ensure_ascii=False)
+            os.replace(tmp, MAL_CACHE_FILE)
+            _MAL_CACHE_DIRTY = False
+        except Exception:
+            pass
+
+
+def mal_fetch_ex(mid, title):
+    """Risolve una voce MAL. Ritorna (dati|None, da_cache).
+    Ordine: cache fresca -> API ufficiale (se c'è il Client ID) -> Jikan -> cache scaduta.
+    Solleva un'eccezione solo se ogni strada fallisce e non c'è nulla in cache."""
+    mid = str(mid or "").strip()
+    title = str(title or "").strip()
+    if not mid and not title:
+        return None, False
+    key = ("id:" + mid) if mid else ("q:" + title.lower())
+    cached, fresh = _mal_cache_get(key)
+    if cached is not None and fresh:
+        return cached, True
+
+    err = None
+    cid = _mal_client_id()
+    if cid:
+        try:
+            d = _mal_official_fetch(mid, title, cid)
+            if d:
+                _mal_cache_put(key, d)
+                return d, False
+            return None, False          # l'API ufficiale ha risposto: davvero non esiste
+        except Exception as e:
+            err = e                      # ufficiale ko: si prova Jikan
+    try:
+        d = _jikan_fetch(mid, title)
+        if d:
+            _mal_cache_put(key, d)
+            return d, False
+        if not err:
+            return None, False          # Jikan ha risposto: davvero non esiste
+    except Exception as e:
+        err = err or e
+
+    if cached is not None:
+        return cached, True             # dato vecchio, meglio di un errore
+    if err:
+        raise err
+    return None, False
+
+
+def mal_fetch(mid, title):
+    """Compatibilità: solo i dati (None se non trovato)."""
+    return mal_fetch_ex(mid, title)[0]
 
 
 def normalize_mal(d):
@@ -174,6 +397,7 @@ def normalize_mal(d):
         "synonyms": d.get("title_synonyms") or [],
         "synopsis": d.get("synopsis") or "",
         "genres": mal_genres(d),
+        "genreIds": mal_genre_ids(d),
         "info": info,
     }
 
@@ -365,12 +589,14 @@ class Handler(BaseHTTPRequestHandler):
             title = q.get("title", [""])[0]
             try:
                 data = mal_fetch(mid, title)
+                mal_cache_flush()
                 if not data:
                     self._json({"found": False})
                 else:
                     self._json({"found": True, "mal": normalize_mal(data)})
             except Exception as e:
-                self._json({"found": False, "error": str(e)}, 502)
+                # errore != "non trovato": il client deve poterli distinguere
+                self._json({"found": False, "error": str(e), "failed": True}, 502)
             return
 
         if path == "/feed":
@@ -583,14 +809,24 @@ class Handler(BaseHTTPRequestHandler):
                     title = str(it.get("title") or "").strip()
                     if not key or (not mid and not title):
                         continue
+                    # esito ESPLICITO: il client deve poter distinguere
+                    # "nessun genere" da "chiamata fallita", altrimenti un errore
+                    # di rete verrebbe scritto come dato definitivo.
                     try:
-                        data = mal_fetch(mid, title)
+                        data, cached = mal_fetch_ex(mid, title)
                         if data:
-                            results[key] = {"malId": str(data.get("mal_id") or ""),
-                                            "genres": mal_genres(data)}
-                    except Exception:
-                        pass  # singolo errore: si salta, il client riproverà semmai
-                    time.sleep(0.6)  # rispetta il limite di richieste di MAL/Jikan
+                            results[key] = {"ok": True,
+                                            "malId": str(data.get("mal_id") or ""),
+                                            "genres": mal_genres(data),
+                                            "genreIds": mal_genre_ids(data)}
+                        else:
+                            results[key] = {"notfound": True}
+                    except Exception as e:
+                        results[key] = {"error": str(e)}
+                        cached = False
+                    if not cached:
+                        time.sleep(0.6)  # rispetta il limite di richieste di MAL/Jikan
+                mal_cache_flush()
                 self._json({"results": results})
             except Exception as e:
                 self._json({"error": str(e)}, 400)

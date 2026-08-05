@@ -37,10 +37,12 @@ def _is_ssl(e):
     return isinstance(reason, ssl.SSLError) or "SSL" in str(reason) or "CERTIFICATE" in str(e).upper()
 
 
-def http_get(url, referer=None, cookie=None, timeout=25, binary=False):
+def http_get(url, referer=None, cookie=None, timeout=25, binary=False, headers=None):
     global _WORKING_CTX
-    headers = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9",
-               "Accept": "text/html,application/xhtml+xml,application/json,*/*"}
+    headers = dict(headers or {})
+    headers.setdefault("User-Agent", UA)
+    headers.setdefault("Accept-Language", "en-US,en;q=0.9")
+    headers.setdefault("Accept", "text/html,application/xhtml+xml,application/json,*/*")
     if referer:
         headers["Referer"] = referer
     if cookie:
@@ -54,7 +56,7 @@ def http_get(url, referer=None, cookie=None, timeout=25, binary=False):
             contexts.append(c)
     last = None
     for ctx in contexts:
-        for attempt in (1, 2):
+        for attempt in (1, 2, 3):
             try:
                 with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
                     data = r.read()
@@ -64,8 +66,10 @@ def http_get(url, referer=None, cookie=None, timeout=25, binary=False):
                 last = e
                 break  # prova il prossimo contesto
             except urllib.error.HTTPError as e:
-                if e.code in (429, 500, 502, 503) and attempt == 1:
-                    time.sleep(1.2)  # blocco temporaneo: riprova una volta
+                # errori transitori (rate-limit / gateway): riprova con backoff.
+                # 504 (Gateway Time-out) è tipico di Jikan/MAL sotto carico.
+                if e.code in (408, 429, 500, 502, 503, 504) and attempt < 3:
+                    time.sleep(1.2 * attempt)
                     continue
                 raise
             except urllib.error.URLError as e:
@@ -174,6 +178,16 @@ class WeebCentral(Source):
     base = "https://weebcentral.com"
     note = "Successore di MangaSee. Stabile."
 
+    # Il sito alterna link assoluti e relativi: i pattern accettano entrambe le
+    # forme, poi _wc_abs() normalizza. Legare i regex al solo dominio esplicito
+    # fa sparire di colpo tutti i capitoli a ogni loro modifica del markup.
+    _RE_SERIES = r'(?:https://weebcentral\.com)?/series/[0-9A-Za-z]+/[^"]*'
+    _RE_CHAPTER = r'(?:https://weebcentral\.com)?/chapters/[^"]+'
+
+    @classmethod
+    def _wc_abs(cls, u):
+        return u if u.startswith("http") else (cls.base + u)
+
     def search(self, query, by="title"):
         qp = urllib.parse.quote(query)
         af = qp if by == "author" else ""
@@ -183,8 +197,8 @@ class WeebCentral(Source):
                "&display_mode=Full+Display")
         html = http_get(url, referer=self.base + "/")
         out, seen = [], set()
-        for m in re.finditer(r'href="(https://weebcentral\.com/series/([0-9A-Za-z]+)/[^"]+)"', html):
-            surl, sid = m.group(1), m.group(2)
+        for m in re.finditer(r'href="((?:https://weebcentral\.com)?/series/([0-9A-Za-z]+)/[^"]+)"', html):
+            surl, sid = self._wc_abs(m.group(1)), m.group(2)
             if sid in seen:
                 continue
             seen.add(sid)
@@ -199,21 +213,27 @@ class WeebCentral(Source):
     def details(self, manga_id):
         page = http_get(manga_id, referer=self.base + "/")
         sid = re.search(r"/series/([0-9A-Za-z]+)", manga_id).group(1)
-        title = self._og(page, "title") or _clean(re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S).group(1)) if re.search(r"<h1", page) else ""
-        title = re.sub(r"\s*\|.*$", "", title or "")
+        # attenzione: qui c'era un bug di precedenza ("A or B if C else ''") che
+        # poteva sollevare AttributeError e far fallire l'intera scheda
+        title = self._og(page, "title")
+        if not title:
+            hm = re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S)
+            title = _clean(re.sub(r"<[^>]+>", " ", hm.group(1))) if hm else ""
+        title = re.sub(r"\s*\|\s*Weeb Central\s*$", "", title or "", flags=re.I)
+        title = re.sub(r"\s*\|.*$", "", title)
         cover = self._og(page, "image") or "https://temp.compsci88.com/cover/normal/%s.webp" % sid
         dm = re.search(r'<p class="whitespace-pre-wrap[^"]*">(.*?)</p>', page, re.S)
         desc = _clean(re.sub(r"<[^>]+>", "", dm.group(1))) if dm else ""
         if not desc:
             desc = self._og(page, "description") or ""
-        chap_html = http_get("%s/series/%s/full-chapter-list" % (self.base, sid), referer=manga_id)
-        chapters = []
-        for m in re.finditer(r'<a[^>]+href="(https://weebcentral\.com/chapters/[^"]+)"[^>]*>(.*?)</a>',
-                             chap_html, re.S):
-            curl, txt = m.group(1), _clean(re.sub(r"<[^>]+>", " ", m.group(2)))
-            nm = re.search(r"([\d.]+)", txt)
-            name = re.sub(r"\s*Last Read.*$", "", txt) or txt
-            chapters.append({"id": curl, "name": name, "number": nm.group(1) if nm else ""})
+        try:
+            chap_html = http_get("%s/series/%s/full-chapter-list" % (self.base, sid), referer=manga_id)
+        except Exception:
+            chap_html = ""
+        chapters = self._parse_chapters(chap_html)
+        if not chapters:
+            # ripiego: la pagina della serie contiene comunque i capitoli
+            chapters = self._parse_chapters(page)
         chapters.reverse()  # dal primo all'ultimo
 
         def field(label):
@@ -222,7 +242,8 @@ class WeebCentral(Source):
         author = field("Author(s):") or field("Author:")
         status = field("Status:")
         year = field("Released:") or field("Year:")
-        gtxt = field("Tag(s):") or field("Tags:")
+        # il sito ha cambiato l'etichetta in "Tags(s):" (ago 2026): le provo tutte
+        gtxt = field("Tags(s):") or field("Tag(s):") or field("Tags:") or field("Genre(s):")
         genres = [g.strip() for g in re.split(r"[,\n]", gtxt) if g.strip()] if gtxt else []
         atxt = field("Associated Name(s):") or field("Associated Names:")
         alts = [a.strip() for a in re.split(r"\s{2,}|;", atxt) if a.strip()] if atxt else []
@@ -230,26 +251,51 @@ class WeebCentral(Source):
                 "author": author, "status": status, "year": year, "genres": genres,
                 "altTitles": alts[:6]}
 
+    def _parse_chapters(self, html):
+        """Estrae i capitoli accettando href assoluti o relativi.
+        Deduplica per URL: la pagina serie elenca sia i recenti sia i primi."""
+        out, seen = [], set()
+        if not html:
+            return out
+        for m in re.finditer(r'<a[^>]*\shref="(%s)"[^>]*>(.*?)</a>' % self._RE_CHAPTER, html, re.S):
+            curl = self._wc_abs(m.group(1))
+            if curl in seen:
+                continue
+            seen.add(curl)
+            txt = _clean(re.sub(r"<[^>]+>", " ", m.group(2)))
+            # via il timestamp ISO e i marcatori dell'interfaccia
+            txt = re.sub(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z?", "", txt).strip()
+            name = re.sub(r"\s*Last Read.*$", "", txt).strip() or txt
+            nm = re.search(r"(?:Chapter|Episode|Chap\.?|Cap\.?)\s*([\d.]+)", name, re.I) \
+                or re.search(r"([\d.]+)", name)
+            out.append({"id": curl, "name": name,
+                        "number": nm.group(1).strip(".") if nm else ""})
+        return out
+
     def latest(self, manga_id):
         sid = re.search(r"/series/([0-9A-Za-z]+)", manga_id).group(1)
-        h = http_get("%s/series/%s/full-chapter-list" % (self.base, sid), referer=manga_id)
-        # scansiona TUTTI i capitoli e prende il numero più alto (robusto: non
-        # dipende dal primo link, che a volte è un capitolo speciale senza numero)
-        best, best_f, count = "", -1.0, 0
-        for m in re.finditer(r'/chapters/[^"]+"[^>]*>(.*?)</a>', h, re.S):
-            count += 1
-            nm = re.search(r"([\d.]+)", re.sub(r"<[^>]+>", " ", m.group(1)))
-            if not nm:
+        try:
+            h = http_get("%s/series/%s/full-chapter-list" % (self.base, sid), referer=manga_id)
+        except Exception:
+            h = ""
+        chapters = self._parse_chapters(h)
+        if not chapters:  # ripiego sulla pagina della serie
+            chapters = self._parse_chapters(http_get(manga_id, referer=self.base + "/"))
+        # prende il numero più alto: non dipende dal primo link, che a volte è
+        # un capitolo speciale senza numero
+        best, best_f = "", -1.0
+        for c in chapters:
+            if not c["number"]:
                 continue
             try:
-                fv = float(nm.group(1))
+                fv = float(c["number"])
             except ValueError:
                 continue
             if fv > best_f:
-                best_f, best = fv, nm.group(1)
+                best_f, best = fv, c["number"]
         # se nessun capitolo ha un numero leggibile ma ce ne sono, usa il conteggio
-        if not best and count:
-            return str(count)
+        if not best and chapters:
+            return str(len(chapters))
         return best
 
     def pages(self, chapter_id):
@@ -258,8 +304,12 @@ class WeebCentral(Source):
         pages = []
         for m in re.finditer(r'<img[^>]+src="([^"]+)"', html):
             src = m.group(1)
-            if re.search(r"\.(jpg|jpeg|png|webp|gif)", src, re.I) and "/cover/" not in src:
-                pages.append(src)
+            if not re.search(r"\.(jpg|jpeg|png|webp|gif)", src, re.I):
+                continue
+            # scarta copertine, loghi del sito e banner pubblicitari
+            if "/cover/" in src or "/static/" in src or "_ads/" in src:
+                continue
+            pages.append(src)
         return {"pages": pages, "referer": self.base + "/"}
 
     @staticmethod
@@ -276,15 +326,15 @@ class WeebCentral(Source):
         # struttura: <a .../series/ID/slug>...<picture>...<img alt="Titolo cover" src=cover>...</a>
         #            <a .../chapters/CID> ...Titolo... Chapter N ... <timestamp ISO> ... </a>
         pat = re.compile(
-            r'href="(https://weebcentral\.com/series/[0-9A-Za-z]+/[^"]*)"'
+            r'href="(%s)"'
             r'.*?<img[^>]*?\balt="([^"]*?)\s*cover"[^>]*?\bsrc="([^"]+)"'
-            r'.*?href="(https://weebcentral\.com/chapters/[^"]+)"[^>]*>(.*?)</a>',
+            r'.*?href="(%s)"[^>]*>(.*?)</a>' % (self._RE_SERIES, self._RE_CHAPTER),
             re.S | re.I)
         # nell'HTML l'attributo src può venire prima di alt: provo entrambe le forme
         pat2 = re.compile(
-            r'href="(https://weebcentral\.com/series/[0-9A-Za-z]+/[^"]*)"'
+            r'href="(%s)"'
             r'.*?<img[^>]*?\bsrc="([^"]+)"[^>]*?\balt="([^"]*?)\s*cover"'
-            r'.*?href="(https://weebcentral\.com/chapters/[^"]+)"[^>]*>(.*?)</a>',
+            r'.*?href="(%s)"[^>]*>(.*?)</a>' % (self._RE_SERIES, self._RE_CHAPTER),
             re.S | re.I)
         out, seen = [], set()
         for m in pat.finditer(scope):
@@ -295,6 +345,7 @@ class WeebCentral(Source):
             txt = _clean(re.sub(r"<[^>]+>", " ", ctext))
             nm = re.search(r"(?:Chapter|Episode)\s+([\d.]+)", txt, re.I)
             tsm = re.search(r"(\d{4}-\d{2}-\d{2}T[\d:.]+)", txt)
+            surl = self._wc_abs(surl)
             out.append({"source": self.id, "id": surl, "title": _clean(title), "cover": cover,
                         "chapter": ("Cap. " + nm.group(1)) if nm else "Nuovo capitolo",
                         "ts": _parse_iso(tsm.group(1)) if tsm else 0})

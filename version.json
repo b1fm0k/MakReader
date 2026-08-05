@@ -1,5 +1,5 @@
 {
-  "version": "1.2.6",
-  "binaryVersion": "1.2.0",
-  "notes": "Pagine a tutto schermo: i comandi ora sono in una barra laterale che si nasconde da sola e ricompare muovendo il mouse.\nNuovo schermo intero (⛶ o tasto F), valido per tutte e 3 le modalità di lettura."
+  "version": "1.2.9",
+  "binaryVersion": "1.2.2",
+  "notes": "WeebCentral: capitoli di nuovo visibili dopo l'aggiornamento del sito. Il parser ora accetta sia link assoluti sia relativi, ripiega sulla pagina della serie se la lista capitoli non risponde e riconosce la nuova etichetta dei generi.\nInfo da MyAnimeList più affidabili: cache locale, riprova automatica sugli errori 504 e API ufficiale MAL opzionale (Client ID nelle Impostazioni).\nPagine a tutto schermo con barra laterale a scomparsa; schermo intero con ⛶ o tasto F."
 }
