@@ -1,5 +1,5 @@
 {
-  "version": "1.3.0",
+  "version": "1.3.1",
   "binaryVersion": "1.3.0",
-  "notes": "Nuova sezione \"Spazio su disco\" nelle Impostazioni: mostra quanto occupa MakReader e dove.\nLa finestra Download ora raggruppa per manga e indica lo spazio di ciascuno, con eliminazione per manga, dei capitoli già letti, di quelli non più in libreria e dei file residui."
+  "notes": "MangaDex: non compaiono più i capitoli che il sito non ospita e che si aprivano vuoti. Spariscono anche i doppioni di numerazione che ne derivavano.\nSe un capitolo del genere viene aperto lo stesso, ora l'app lo spiega invece di mostrare una pagina vuota."
 }

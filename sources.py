@@ -636,6 +636,11 @@ class MangaDex(Source):
             data = feed.get("data") or []
             for c in data:
                 ca = c["attributes"]
+                # Capitoli "esterni": MangaDex li elenca ma NON ne ospita le pagine,
+                # rimanda al sito dell'editore. Nel lettore risultavano vuoti, quindi
+                # non vanno mostrati (sono anche la causa dei doppioni di numero).
+                if ca.get("externalUrl"):
+                    continue
                 chapters.append({"id": c["id"], "name": self.chlabel + " " + (ca.get("chapter") or "?"),
                                  "number": ca.get("chapter") or "", "vol": ca.get("volume") or ""})
             off += 100
@@ -663,6 +668,9 @@ class MangaDex(Source):
         at = json.loads(http_get("%s/at-home/server/%s" % (self.base, chapter_id)))
         b, h = at["baseUrl"], at["chapter"]["hash"]
         pages = ["%s/data/%s/%s" % (b, h, f) for f in at["chapter"]["data"]]
+        if not pages:
+            raise RuntimeError("Capitolo non disponibile qui: su MangaDex rimanda al sito "
+                               "dell'editore. Prova a leggerlo da un'altra sorgente.")
         return {"pages": pages, "referer": ""}
 
     def latest_feed(self, limit=30):
