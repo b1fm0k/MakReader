@@ -211,6 +211,8 @@ class WeebCentral(Source):
         return out
 
     def details(self, manga_id):
+        # un indirizzo relativo può arrivare dalle Uscite o da manga già salvati in libreria
+        manga_id = self._wc_abs(manga_id)
         page = http_get(manga_id, referer=self.base + "/")
         sid = re.search(r"/series/([0-9A-Za-z]+)", manga_id).group(1)
         # attenzione: qui c'era un bug di precedenza ("A or B if C else ''") che
@@ -273,6 +275,7 @@ class WeebCentral(Source):
         return out
 
     def latest(self, manga_id):
+        manga_id = self._wc_abs(manga_id)
         sid = re.search(r"/series/([0-9A-Za-z]+)", manga_id).group(1)
         try:
             h = http_get("%s/series/%s/full-chapter-list" % (self.base, sid), referer=manga_id)
@@ -299,6 +302,7 @@ class WeebCentral(Source):
         return best
 
     def pages(self, chapter_id):
+        chapter_id = self._wc_abs(chapter_id)
         url = chapter_id + "/images?is_prev=False&current_page=1&reading_style=long_strip"
         html = http_get(url, referer=chapter_id)
         pages = []
@@ -360,6 +364,7 @@ class WeebCentral(Source):
                 txt = _clean(re.sub(r"<[^>]+>", " ", ctext))
                 nm = re.search(r"(?:Chapter|Episode)\s+([\d.]+)", txt, re.I)
                 tsm = re.search(r"(\d{4}-\d{2}-\d{2}T[\d:.]+)", txt)
+                surl = self._wc_abs(surl)
                 out.append({"source": self.id, "id": surl, "title": _clean(title), "cover": cover,
                             "chapter": ("Cap. " + nm.group(1)) if nm else "Nuovo capitolo",
                             "ts": _parse_iso(tsm.group(1)) if tsm else 0})
