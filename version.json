@@ -1,5 +1,5 @@
 {
-  "version": "1.3.2",
-  "binaryVersion": "1.3.0",
-  "notes": "Uscite: aprire un manga di WeebCentral dalle ultime uscite dava errore invece di mostrare la scheda.\nMangaDex: non compaiono più i capitoli che si aprivano vuoti, né i doppioni di numerazione che ne derivavano."
+  "version": "1.4.0",
+  "binaryVersion": "1.4.0",
+  "notes": "Informazioni da MyAnimeList di nuovo disponibili: trama, dati del manga e aggiornamento dei generi.\nUscite: aprire un manga di WeebCentral dalle ultime uscite non dà più errore.\nMangaDex: non compaiono più i capitoli che si aprivano vuoti."
 }

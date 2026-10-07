@@ -37,6 +37,15 @@ def _is_ssl(e):
     return isinstance(reason, ssl.SSLError) or "SSL" in str(reason) or "CERTIFICATE" in str(e).upper()
 
 
+# Servizio pubblico che espone i dati di MyAnimeList (stesso formato dell'ex Jikan v4).
+# Sta QUI e non in mangareader.py perché questo file si aggiorna da solo: se il
+# servizio cambia indirizzo basta l'aggiornamento rapido, senza release.
+# Storia: Jikan (api.jikan.moe/v4) chiuso il 1/10/2026 -> Tenrai.
+# Limiti pubblici: 60 richieste/min, 3/sec.
+MAL_API_BASE = "https://api.tenrai.org/v1"
+MAL_API_PAUSE = 1.05   # secondi fra una richiesta e l'altra nelle scansioni
+
+
 def http_get(url, referer=None, cookie=None, timeout=25, binary=False, headers=None):
     global _WORKING_CTX
     headers = dict(headers or {})
@@ -67,7 +76,7 @@ def http_get(url, referer=None, cookie=None, timeout=25, binary=False, headers=N
                 break  # prova il prossimo contesto
             except urllib.error.HTTPError as e:
                 # errori transitori (rate-limit / gateway): riprova con backoff.
-                # 504 (Gateway Time-out) è tipico di Jikan/MAL sotto carico.
+                # 504 (Gateway Time-out) è tipico dei servizi MAL sotto carico.
                 if e.code in (408, 429, 500, 502, 503, 504) and attempt < 3:
                     time.sleep(1.2 * attempt)
                     continue

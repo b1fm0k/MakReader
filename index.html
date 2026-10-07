@@ -178,7 +178,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.3.2</span>
+    <span class="vertag" title="Versione installata">v1.4.0</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -397,7 +397,7 @@ function renderSettings(){
 
    <div class="setcard"><h4>MyAnimeList</h4>
      <div class="setrow">
-       <div class="sl"><div class="t">Client ID (facoltativo)</div><div class="d">Senza, l'app usa il servizio pubblico Jikan, che ultimamente è spesso irraggiungibile (errori 504). Con un Client ID tuo, le informazioni arrivano dall'API ufficiale di MyAnimeList, molto più affidabile.<br>Si ottiene gratis in un minuto su <a href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a> → "Create ID": copia qui il campo <b>Client ID</b> (il Client Secret non serve).<br>Resta salvato solo sul tuo computer.</div></div>
+       <div class="sl"><div class="t">Client ID (facoltativo)</div><div class="d">Senza, l'app usa un servizio pubblico gratuito che riprende i dati di MyAnimeList. Con un Client ID tuo, le informazioni arrivano direttamente dall'API ufficiale di MyAnimeList.<br>Si ottiene gratis in un minuto su <a href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a> → "Create ID": copia qui il campo <b>Client ID</b> (il Client Secret non serve).<br>Resta salvato solo sul tuo computer.</div></div>
        <input id="setMalCid" placeholder="Incolla qui il Client ID" value="${esc(SET.malClientId||"")}" style="width:230px">
      </div>
    </div>
@@ -478,7 +478,7 @@ function renderSettings(){
   };
   const mc=$("#setMalCid");if(mc)mc.onchange=e=>{
     SET.malClientId=e.target.value.trim();DB.settings=SET;saveDB();
-    toast(SET.malClientId?"Client ID salvato ✓ ora si usa l'API ufficiale MAL":"Client ID rimosso: si torna a Jikan");
+    toast(SET.malClientId?"Client ID salvato ✓ ora si usa l'API ufficiale MAL":"Client ID rimosso: si torna al servizio pubblico");
   };
   const bb=$("#setBackup");if(bb)bb.onclick=exportLibrary;
   const rr=$("#setRestore");if(rr)rr.onclick=()=>$("#backupFile").click();

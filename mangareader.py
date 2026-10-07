@@ -24,7 +24,7 @@ import urllib.error
 # Versione del BINARIO (questo file non si auto-aggiorna).
 # Va tenuta allineata a "binaryVersion" di version.json a ogni release che
 # tocca mangareader.py, altrimenti l'app continua a chiedere di riscaricarsi.
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -156,7 +156,7 @@ def mal_genre_ids(d):
 
 
 def _jikan(url):
-    """GET su Jikan (ponte non ufficiale verso MyAnimeList) con errori leggibili.
+    """GET sul servizio pubblico MAL (formato Jikan v4) con errori leggibili.
     Le riprove sugli errori transitori (incluso il 504) le fa sources.http_get."""
     try:
         return json.loads(sources.http_get(url, timeout=20))
@@ -175,11 +175,21 @@ def _jikan(url):
             "Impossibile contattare MyAnimeList. Controlla la connessione e riprova.") from None
 
 
+def _mal_api_base():
+    """Indirizzo del servizio pubblico MAL. Viene da sources.py, che si aggiorna da
+    solo: così un cambio di servizio non richiede un binario nuovo."""
+    return str(getattr(sources, "MAL_API_BASE", "") or "https://api.tenrai.org/v1").rstrip("/")
+
+
 def _jikan_fetch(mid, title):
-    """Voce manga da Jikan: per ID se c'è, altrimenti per titolo. None = non trovato."""
+    """Voce manga dal servizio pubblico MAL (formato Jikan v4): per ID se c'è,
+    altrimenti per titolo. None = non trovato.
+    Nota: Jikan (api.jikan.moe) è stato chiuso il 1/10/2026; ora si usa Tenrai,
+    che ne mantiene lo stesso formato."""
+    base = _mal_api_base()
     if mid:
-        return _jikan("https://api.jikan.moe/v4/manga/" + urllib.parse.quote(mid)).get("data") or None
-    arr = _jikan("https://api.jikan.moe/v4/manga?limit=1&q=" + urllib.parse.quote(title)).get("data") or []
+        return _jikan(base + "/manga/" + urllib.parse.quote(mid)).get("data") or None
+    arr = _jikan(base + "/manga?limit=1&q=" + urllib.parse.quote(title)).get("data") or []
     return arr[0] if arr else None
 
 
@@ -890,7 +900,8 @@ class Handler(BaseHTTPRequestHandler):
                         results[key] = {"error": str(e)}
                         cached = False
                     if not cached:
-                        time.sleep(0.6)  # rispetta il limite di richieste di MAL/Jikan
+                        # rispetta il limite del servizio pubblico (60 richieste/min)
+                        time.sleep(float(getattr(sources, "MAL_API_PAUSE", 1.05) or 1.05))
                 mal_cache_flush()
                 self._json({"results": results})
             except Exception as e:
