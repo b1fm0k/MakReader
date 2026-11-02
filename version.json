@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
+  "version": "1.5.1",
   "binaryVersion": "1.5.0",
-  "notes": "MakReader si può usare anche dal telefono o dal tablet collegati al Wi-Fi di casa: si attiva in Impostazioni, in fondo, con un PIN. Da spento tutto resta come prima.\nUscite: lo stesso capitolo pubblicato su più fonti compare una volta sola, i manga già in libreria sono segnati ed è possibile mostrare solo quelli.\nGrafica adattata agli schermi piccoli; nel lettore la doppia pagina passa a pagina singola sul telefono in verticale."
+  "notes": "Lettore sul telefono: scorrere non fa più ricomparire i comandi. Un tocco al centro dello schermo li mostra o li nasconde; nelle modalità a pagine il tocco a sinistra o a destra gira pagina."
 }

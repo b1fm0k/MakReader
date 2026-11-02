@@ -214,7 +214,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.5.0</span>
+    <span class="vertag" title="Versione installata">v1.5.1</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -1427,7 +1427,9 @@ function renderPages(){
     const chk=()=>{if(im.naturalWidth>im.naturalHeight&&!reader.wide.has(i)){reader.wide.add(i);if(reader.dbl)applyPageVis();}};
     im.complete?chk():im.addEventListener("load",chk);
   });
-  if(reader.paged)pg.onclick=e=>{const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl'&&SET.navFlip!==false)?!right:right)?nextPage():prevPage();};else pg.onclick=null;
+  if(reader.paged)pg.onclick=e=>{
+    if(Date.now()-lastTouch<700)return;   // tocco sul telefono: lo gestisce touchend (terzi dello schermo)
+    const r=pg.getBoundingClientRect();const right=e.clientX>r.left+r.width/2;((SET.dir==='rtl'&&SET.navFlip!==false)?!right:right)?nextPage():prevPage();};else pg.onclick=null;
   showChrome();
   applyPageVis();if(reader.paged)preload();
 }
@@ -1504,8 +1506,33 @@ document.addEventListener("webkitfullscreenchange",updateFullBtn);
 let chromeT, chromeLock=false;
 function scheduleHide(){clearTimeout(chromeT);chromeT=setTimeout(()=>{if(!chromeLock&&$("#reader").style.display==="block")$("#reader").classList.add("chromehide");},2600);}
 function showChrome(){$("#reader").classList.remove("chromehide");scheduleHide();}
-$("#reader").addEventListener("mousemove",showChrome);
-$("#reader").addEventListener("touchstart",showChrome,{passive:true});
+// Mouse (computer): le barre compaiono muovendo il mouse e spariscono da sole.
+$("#reader").addEventListener("pointermove",e=>{if(e.pointerType==="mouse")showChrome();});
+// Tocco (telefono/tablet): trascinare per scorrere NON mostra le barre (anzi le
+// nasconde); un tocco al centro le mostra/nasconde e restano ferme; nelle
+// modalità a pagine il tocco a sinistra/destra gira pagina.
+let lastTouch=0,tStart=null;
+function hideChromeNow(){clearTimeout(chromeT);$("#reader").classList.add("chromehide");}
+$("#reader").addEventListener("touchstart",e=>{lastTouch=Date.now();const t=e.touches[0];tStart=t?{x:t.clientX,y:t.clientY,ts:Date.now()}:null;},{passive:true});
+$("#reader").addEventListener("touchmove",e=>{
+  if(!tStart||e.target.closest(".rside,.rhead"))return;
+  const t=e.touches[0];if(t&&Math.hypot(t.clientX-tStart.x,t.clientY-tStart.y)>10)hideChromeNow();
+},{passive:true});
+$("#reader").addEventListener("touchend",e=>{
+  lastTouch=Date.now();
+  const s0=tStart;tStart=null;if(!s0)return;
+  if(e.target.closest(".rside,.rhead"))return;                 // tocco sui comandi: lascia fare
+  const t=e.changedTouches[0];if(!t)return;
+  if(Math.hypot(t.clientX-s0.x,t.clientY-s0.y)>10||Date.now()-s0.ts>400)return;   // era uno scorrimento
+  const w=innerWidth,x=t.clientX;
+  if(reader.paged&&(x<w/3||x>w*2/3)){                            // lati: gira pagina
+    const right=x>w/2;((SET.dir==='rtl'&&SET.navFlip!==false)?!right:right)?nextPage():prevPage();
+    hideChromeNow();return;
+  }
+  const r=$("#reader");                                         // centro: mostra/nasconde
+  if(r.classList.contains("chromehide")){clearTimeout(chromeT);r.classList.remove("chromehide");}
+  else hideChromeNow();
+},{passive:true});
 [".rside",".rhead"].forEach(sel=>{const el=document.querySelector(sel);el.addEventListener("mouseenter",()=>{chromeLock=true;clearTimeout(chromeT);$("#reader").classList.remove("chromehide");});el.addEventListener("mouseleave",()=>{chromeLock=false;scheduleHide();});});
 $("#rChap").onchange=e=>{reader.idx=+e.target.value;loadChapter();};
 $("#rDir").onclick=()=>{SET.dir=SET.dir==="rtl"?"ltr":"rtl";saveSettings();updateDirBtn();applyPageVis();toast(SET.dir==="rtl"?"Direzione: destra → sinistra (manga)":"Direzione: sinistra → destra");};
