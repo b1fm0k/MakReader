@@ -6,6 +6,11 @@
 <title>MakReader</title>
 <link rel="icon" type="image/png" href="/icon">
 <link rel="apple-touch-icon" href="/icon">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="MakReader">
+<meta name="theme-color" content="#0e1014">
 <style>
   :root{--bg:#0e1014;--panel:#171a21;--panel2:#1f232c;--border:#2a2f3a;--text:#e7e9ee;
     --muted:#9aa3b2;--accent:#7c5cff;--accent2:#5a8dee;--good:#3ec27a;--warn:#e0a13a;--reader-bg:#0a0a0a;}
@@ -54,6 +59,8 @@
   .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}
   .chip{background:var(--panel);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:20px;font-size:13px;cursor:pointer}
   .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* aperta dal telefono: niente comandi riservati al computer */
+  .remote .localonly{display:none!important}
   .chap .dot{width:9px;height:9px;border-radius:50%;background:var(--accent2);flex:none}
   .chap.st-cur{border-color:#1fa9e0}.chap.st-new{border-color:#e8514a}
   .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:10px}
@@ -136,6 +143,35 @@
   .pages.paged.dbl{flex-direction:row;align-items:center;justify-content:center}
   .pages.paged.dbl.rtl{flex-direction:row-reverse}
   .pages.paged.dbl img.cur{max-width:50%}
+  /* nelle modalità a pagine la larghezza la decide lo schermo: l'impostazione
+     "larghezza pagina" (stile in linea) non deve far uscire la tavola dai bordi */
+  .pages.paged img{max-width:100%!important}
+  .pages.paged.dbl img.cur{max-width:50%!important}
+  /* barra laterale del lettore: scorre se lo schermo è basso (telefono orizzontale) */
+  .rside{max-height:calc(100vh - 20px);overflow-y:auto;scrollbar-width:none}
+  .rside::-webkit-scrollbar{display:none}
+  .srcpill{max-width:calc(100% - 50px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* ---- schermi da telefono ---- */
+  @media (max-width:640px){
+    .bar{gap:6px;padding:8px 10px}
+    .logo{font-size:18px}
+    .tabs{order:3;flex:1 1 100%;overflow-x:auto;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{padding:7px 10px;font-size:13px;white-space:nowrap}
+    .ricon{width:34px;height:34px}
+    .navicon,#quitTop{font-size:19px}
+    main{padding:12px 10px 70px}
+    .toolbar{gap:7px}
+    .toolbar .btn,.toolbar select,.toolbar input{font-size:13px;padding:7px 10px}
+    .grid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px}
+    .card .t{font-size:12px}
+    .srcpill{font-size:9px;padding:2px 5px}
+    .hero .detail-head{padding:14px;gap:14px}
+    .detail-head .cover{width:118px}
+    .detail-info h1{font-size:19px;margin-top:0}
+    .rside{right:6px;padding:8px 6px;gap:5px}
+    .rside .ricon{width:34px;height:34px}
+  }
   .rside{position:fixed;top:50%;right:10px;transform:translateY(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 8px;background:rgba(10,10,10,.82);backdrop-filter:blur(8px);border:1px solid #222;border-radius:14px;transition:transform .25s ease,opacity .25s ease}
   #reader.light .rside{background:rgba(233,230,223,.92);border-color:#cbc8c0;color:#222}
   .rside .sep{width:24px;height:1px;background:#333;margin:2px 0}
@@ -178,7 +214,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.4.0</span>
+    <span class="vertag" title="Versione installata">v1.5.0</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -188,7 +224,7 @@
     <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
       <button class="ricon navicon" data-nav="sources" title="Sorgenti">🌐</button>
       <button class="ricon navicon" data-nav="settings" title="Impostazioni">⚙️</button>
-      <button class="ricon" id="quitTop" title="Chiudi MakReader">⏻</button>
+      <button class="ricon localonly" id="quitTop" title="Chiudi MakReader">⏻</button>
     </div>
   </div>
 </header>
@@ -271,7 +307,12 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");se
 // di MangaDex arriva come 2022, non "2022") e su un numero .replace() non esiste:
 // l'eccezione interrompeva il disegno della scheda lasciandola a caricare all'infinito.
 function esc(s){return(s===null||s===undefined?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
-async function jget(u){const r=await fetch(u);const d=await r.json();if(d&&d.error)throw new Error(d.error);return d;}
+// aperta da un altro dispositivo (telefono) invece che dal computer stesso?
+const REMOTE=!["localhost","127.0.0.1","::1","[::1]"].includes(location.hostname);
+if(REMOTE)document.documentElement.classList.add("remote");
+async function jget(u){const r=await fetch(u);const d=await r.json();
+  if(d&&d.needPin){location.reload();throw new Error("PIN richiesto");}   // PIN cambiato o accesso scaduto
+  if(d&&d.error)throw new Error(d.error);return d;}
 let dataLoaded=false;
 async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
 
@@ -295,19 +336,48 @@ function showTab(name){
 
 // ---------- uscite recenti ----------
 let latestSource=localStorage.getItem("latestSource")||"__all__";
+let latestMine=localStorage.getItem("latestMine")==="1";   // filtro "Solo i miei manga"
 function relTime(ts){
   if(!ts)return "";
   const d=Date.now()/1000-ts;
-  if(d<3600)return Math.max(1,Math.round(d/60))+" min fa";
-  if(d<86400)return Math.round(d/3600)+" ore fa";
+  if(d<3600){const m=Math.max(1,Math.round(d/60));return m+" min fa";}
+  if(d<86400){const h=Math.round(d/3600);return h===1?"1 ora fa":h+" ore fa";}
   if(d<172800)return "ieri";
   return Math.round(d/86400)+" giorni fa";
 }
-function latestCard(it){
+// titolo "normalizzato" per riconoscere lo stesso manga su fonti diverse
+function normTitle(t){return String(t||"").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/[^\p{L}\p{N}]+/gu,"");}
+// "Cap. 011" -> "Cap. 11" (gli zeri iniziali arrivano da alcune fonti)
+function fmtChap(s){return String(s||"").replace(/(^|[^\d.])0+(\d)/,"$1$2");}
+function chapNum(s){const m=String(s||"").match(/(\d+(?:\.\d+)?)/);return m?String(parseFloat(m[1])):"";}
+// Unisce le uscite dello stesso manga allo stesso capitolo arrivate da fonti diverse
+// (es. MangaFox e MangaHere hanno lo stesso catalogo). Le uscite arrivano già
+// ordinate dalla più recente: il primo elemento del gruppo resta quello di riferimento.
+function groupLatest(items){
+  const libTitles={};
+  for(const k in DB.follows){const f=DB.follows[k];const n=normTitle(f.title);if(n&&!libTitles[n])libTitles[n]=k;}
+  const groups=[],byKey={};
+  for(const it of items){
+    const n=normTitle(it.title);
+    const gk=n?(n+"|"+chapNum(it.chapter)):(it.source+"|"+it.id);
+    let g=byKey[gk];
+    if(!g){g=byKey[gk]={main:it,srcs:[],libKey:null};groups.push(g);}
+    if(!g.srcs.some(s=>s.source===it.source))g.srcs.push({source:it.source,id:it.id});
+    const k=key(it.source,it.id);
+    if(DB.follows[k])g.libKey=k;               // seguito proprio da questa fonte
+  }
+  for(const g of groups){if(!g.libKey){const n=normTitle(g.main.title);if(n&&libTitles[n])g.libKey=libTitles[n];}}
+  return groups;
+}
+function latestCard(g,i){
+  const it=g.main;
   const cover=it.cover?`<img class="cover" src="${img(it.cover,srcRef(it.source))}" loading="lazy" onerror="this.style.visibility='hidden'">`:'<div class="cover"></div>';
-  const meta=esc(it.chapter||"")+(it.ts?(' · '+esc(relTime(it.ts))):'');
-  return `<div class="card" data-src="${esc(it.source)}" data-id="${esc(it.id)}">`+
-    `<span class="srcpill">${esc(metaOf(it.source).name)}</span>${cover}`+
+  const meta=esc(fmtChap(it.chapter||""))+(it.ts?(' · '+esc(relTime(it.ts))):'');
+  const nomi=g.srcs.map(s=>metaOf(s.source).name);
+  const pill=nomi.length>2?(nomi[0]+" +"+(nomi.length-1)):nomi.join(" · ");
+  const lib=g.libKey?'<span class="inlib" title="Nella tua libreria">✓</span>':'';
+  return `<div class="card" data-i="${i}" title="${esc(it.title||'')}${nomi.length>1?' — su '+esc(nomi.join(', ')):''}">`+
+    `<span class="srcpill">${esc(pill)}</span>${lib}${cover}`+
     `<div class="meta"><div class="t">${esc(it.title)||'?'}</div><div class="s">${meta}</div></div></div>`;
 }
 async function renderLatest(){
@@ -316,15 +386,25 @@ async function renderLatest(){
   const sel='<select id="latestSrc" style="padding:9px 11px"><option value="__all__">Tutte le fonti</option>'+
     en.map(id=>`<option value="${id}" ${id===latestSource?'selected':''}>${esc(metaOf(id).name)}</option>`).join("")+'</select>';
   v.innerHTML='<div class="toolbar"><h3 class="sec" style="margin:0">Uscite recenti</h3>'+sel+
-    '<span class="sub" style="margin-left:auto;font-size:12px">caricato sulla fonte</span></div>'+
+    `<button class="chip ${latestMine?'on':''}" id="latestMineBtn" style="margin-left:auto" title="Mostra solo i manga che hai in libreria">Solo i miei manga</button></div>`+
     '<div id="latestGrid"><div class="loading"><div class="spin"></div></div></div>';
   $("#latestSrc").onchange=()=>{latestSource=$("#latestSrc").value;localStorage.setItem("latestSource",latestSource);renderLatest();};
+  $("#latestMineBtn").onclick=()=>{latestMine=!latestMine;localStorage.setItem("latestMine",latestMine?"1":"0");renderLatest();};
   const g=$("#latestGrid");
   try{
     const url=latestSource==="__all__"?("/feed?sources="+encodeURIComponent(en.join(","))):("/feed?source="+encodeURIComponent(latestSource));
-    const d=await jget(url);const items=d.items||[];
-    g.innerHTML=items.length?('<div class="grid">'+items.map(latestCard).join("")+'</div>'):'<div class="empty">Nessuna uscita recente da questa fonte.</div>';
-    g.querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.src,c.dataset.id));
+    const d=await jget(url);
+    let groups=groupLatest(d.items||[]);
+    if(latestMine)groups=groups.filter(x=>x.libKey);
+    const vuoto=latestMine?'Nessuna uscita recente per i manga della tua libreria.':'Nessuna uscita recente da questa fonte.';
+    g.innerHTML=groups.length?('<div class="grid">'+groups.map(latestCard).join("")+'</div>'):`<div class="empty">${vuoto}</div>`;
+    g.querySelectorAll(".card").forEach(c=>c.onclick=()=>{
+      const x=groups[+c.dataset.i];if(!x)return;
+      // se il manga è in libreria apro la fonte che segui, così i progressi continuano lì
+      const f=x.libKey&&DB.follows[x.libKey];
+      if(f)openDetail(f.source,f.id,{title:f.title,cover:f.cover});
+      else openDetail(x.srcs[0].source,x.srcs[0].id,x.main);
+    });
   }catch(e){g.innerHTML='<div class="errbox">Errore nel caricamento: '+esc(e.message||String(e))+'</div>';}
 }
 
@@ -402,7 +482,7 @@ function renderSettings(){
      </div>
    </div>
 
-   <div class="setcard"><h4>Spazio su disco</h4>
+   <div class="setcard localonly"><h4>Spazio su disco</h4>
      <div class="setrow">
        <div class="sl"><div class="t">Cosa occupa MakReader</div><div class="d" id="stoDesc">Calcolo in corso…</div></div>
        <button class="btn sec" id="stoRefresh">Ricalcola</button>
@@ -424,15 +504,67 @@ function renderSettings(){
    <div class="setcard"><h4>Applicazione</h4>
      <div class="setrow">
        <div class="sl"><div class="t">Backup della libreria</div><div class="d">Per sicurezza o per spostarla su un altro computer.</div></div>
-       <div style="display:flex;gap:8px"><button class="btn sec" id="setBackup">⤓ Backup</button><button class="btn sec" id="setRestore">⤒ Ripristina</button></div>
+       <div style="display:flex;gap:8px"><button class="btn sec" id="setBackup">⤓ Backup</button><button class="btn sec localonly" id="setRestore">⤒ Ripristina</button></div>
      </div>
-     <div class="setrow">
+     <div class="setrow localonly">
        <div class="sl"><div class="t">Aggiornamenti di MakReader</div><div class="d">Versione installata: ${esc(ver)}</div></div>
        <button class="btn sec" id="checkUpd">Controlla</button>
        <div id="updMsg" class="sub" style="flex-basis:100%;margin:0 0 4px"></div>
      </div>
    </div>
+
+   <div class="setcard localonly" id="lanCard"><h4>Accesso da altri dispositivi</h4>
+     <div class="setrow">
+       <div class="sl"><div class="t">Usa MakReader dal telefono o dal tablet</div><div class="d">Solo dalla rete Wi-Fi di casa e solo con un PIN. Da spento, MakReader funziona solo su questo computer, come sempre.</div></div>
+       <label class="switch"><input type="checkbox" id="lanOn"><span class="slider"></span></label>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="t">PIN</div><div class="d" id="lanPinDesc">Da 4 a 8 cifre. Serve sul telefono la prima volta che apri l'app.</div></div>
+       <input id="lanPin" type="password" inputmode="numeric" maxlength="8" placeholder="Nuovo PIN" autocomplete="new-password" style="width:130px">
+       <button class="btn sec" id="lanPinSave">Salva PIN</button>
+     </div>
+     <div class="setrow" id="lanAddrRow" style="display:none">
+       <div class="sl"><div class="t">Sul telefono apri</div><div class="d" id="lanAddr"></div></div>
+     </div>
+     <div class="setrow">
+       <div class="sl"><div class="d" style="margin:0">Usalo solo sul Wi-Fi di casa, non su reti pubbliche (bar, hotel): il collegamento fra telefono e computer non è cifrato.<br>Il computer deve restare acceso con MakReader aperto. La prima volta potrebbe chiedere se consentire le connessioni in entrata a MakReader: rispondi Consenti.<br>Se il telefono non trova il computer e usi una VPN, controlla che non sia attiva un'opzione come "Invisibilità sulla LAN".<br>Cancellare download, ripristinare un backup e aggiornare l'app restano possibili solo da questo computer.</div></div>
+     </div>
+   </div>
   </div>`;
+  // --- accesso da altri dispositivi (solo dal computer) ---
+  async function dipingiLan(){
+    const on=$("#lanOn");if(!on||REMOTE)return;
+    let info=null;try{info=await jget("/lan/info");}catch(e){return;}
+    on.checked=!!info.enabled;
+    $("#lanPinDesc").textContent=info.hasPin?"PIN impostato. Scrivine uno nuovo per cambiarlo: i telefoni già collegati dovranno reinserirlo.":"Da 4 a 8 cifre. Serve sul telefono la prima volta che apri l'app.";
+    const row=$("#lanAddrRow"),a=$("#lanAddr");
+    if(info.enabled&&info.active&&info.addresses&&info.addresses.length){
+      row.style.display="";
+      a.innerHTML=info.addresses.map(u=>`<b style="user-select:all;font-size:14px">${esc(u)}</b>`).join("<br>")+
+        "<br>Se il primo indirizzo non funziona prova il secondo. Poi in Safari: Condividi → Aggiungi alla schermata Home.";
+    }else row.style.display="none";
+  }
+  async function salvaLan(body){
+    const r=await fetch("/lan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.error){toast(d.error);dipingiLan();return false;}
+    if(d.restart){toast("Riavvio di MakReader in corso…");setTimeout(()=>location.reload(),3500);}
+    else{toast(body.pin?"PIN salvato ✓":"Fatto");dipingiLan();}
+    return true;
+  }
+  dipingiLan();
+  const lo=$("#lanOn");if(lo)lo.onchange=async e=>{
+    const pin=($("#lanPin").value||"").trim();
+    if(e.target.checked&&!confirm("Accendere l'accesso dagli altri dispositivi della rete di casa?\n\nServirà il PIN. Usalo solo sul Wi-Fi di casa."))
+      {e.target.checked=false;return;}
+    await salvaLan(pin?{enabled:e.target.checked,pin}:{enabled:e.target.checked});
+    $("#lanPin").value="";
+  };
+  const lps=$("#lanPinSave");if(lps)lps.onclick=async()=>{
+    const pin=($("#lanPin").value||"").trim();
+    if(!/^\d{4,8}$/.test(pin)){toast("Il PIN deve avere da 4 a 8 cifre.");return;}
+    if(await salvaLan({enabled:$("#lanOn").checked,pin}))$("#lanPin").value="";
+  };
   const sd=$("#setDir");if(sd)sd.onchange=e=>{SET.dir=e.target.value;DB.settings=SET;saveDB();};
   const nf=$("#setNavFlip");if(nf)nf.onchange=e=>{SET.navFlip=e.target.checked;DB.settings=SET;saveDB();};
   const sw=$("#setWidth");if(sw)sw.onchange=e=>{SET.width=e.target.value;DB.settings=SET;saveDB();};
@@ -1253,7 +1385,7 @@ function setBadge(n){const b=$("#updBadge");if(n>0){b.textContent=n;b.classList.
 // ---------- reader ----------
 const WIDTHS={S:560,M:760,L:1040};
 async function openReader(src,chapters,idx,mangaKey,title,cover,ref,startPage){
-  reader={chapters,idx,pages:[],page:0,paged:readerMode!=="scroll",dbl:readerMode==="double",key:mangaKey,source:src,title,cover,ref:"",resume:startPage||0,offline:false,wide:new Set()};
+  reader={chapters,idx,pages:[],page:0,paged:readerMode!=="scroll",dbl:useDbl(),key:mangaKey,source:src,title,cover,ref:"",resume:startPage||0,offline:false,wide:new Set()};
   $("#reader").style.display="block";
   $("#rChap").innerHTML=chapters.map((c,i)=>`<option value="${i}">${esc(c.name||('Cap. '+c.number))}</option>`).join("");
   updateDirBtn();updateModeBtn();
@@ -1276,6 +1408,15 @@ async function loadChapter(){
     pg.innerHTML=`<div class="errbox" style="margin:20px">Impossibile caricare le pagine da ${esc(metaOf(reader.source).name)}.<br><br>${esc(e.message)}<br><br>Suggerimento: prova lo stesso manga da un'altra sorgente (es. WeebCentral), oppure passa al capitolo successivo.</div>`;
   }
 }
+// Doppia pagina solo se lo schermo la regge: su un telefono in verticale due tavole
+// affiancate sarebbero illeggibili, quindi si mostra una pagina alla volta
+// (girando il telefono in orizzontale torna la doppia).
+function useDbl(){return readerMode==="double"&&!(innerWidth<700&&innerHeight>innerWidth);}
+let _rszT;
+window.addEventListener("resize",()=>{clearTimeout(_rszT);_rszT=setTimeout(()=>{
+  if($("#reader").style.display!=="block"||!reader.paged)return;
+  const d=useDbl();if(d!==reader.dbl){reader.dbl=d;renderPages();}
+},200);});
 function renderPages(){
   const pg=$("#rPages");pg.className="pages"+(reader.paged?" paged":"")+(reader.dbl?" dbl":"");
   if(!reader.pages.length){pg.innerHTML='<div class="errbox" style="margin:20px">Nessuna pagina trovata.</div>';return;}
@@ -1342,7 +1483,7 @@ function updateDirBtn(){const b=$("#rDir");const rtl=SET.dir==="rtl";b.textConte
 $("#rMode").onclick=()=>{
   readerMode=MODES[(MODES.indexOf(readerMode)+1)%MODES.length];
   localStorage.setItem("readerMode",readerMode);
-  reader.paged=readerMode!=="scroll";reader.dbl=readerMode==="double";
+  reader.paged=readerMode!=="scroll";reader.dbl=useDbl();
   updateModeBtn();renderPages();
   if(!reader.paged&&reader.page>0)setTimeout(()=>scrollToPage(reader.page),60);
   toast("Modalità: "+MODE_INFO[readerMode][1]);
@@ -1355,6 +1496,8 @@ function toggleFull(){
 }
 function updateFullBtn(){const b=$("#rFull");if(!b)return;const on=!!document.fullscreenElement;b.textContent=on?"⛗":"⛶";b.title=on?"Esci da schermo intero (F)":"Schermo intero (F)";}
 $("#rFull").onclick=toggleFull;
+// su iPhone Safari non permette lo schermo intero alle pagine web: il pulsante sparisce
+if(!(document.fullscreenEnabled||document.webkitFullscreenEnabled))$("#rFull").style.display="none";
 document.addEventListener("fullscreenchange",updateFullBtn);
 document.addEventListener("webkitfullscreenchange",updateFullBtn);
 // auto-nascondi barre del lettore
@@ -1415,7 +1558,7 @@ function openDownloadsModal(){
 
     box.innerHTML=`${expSec}<h2>Download offline</h2>
       <p class="sub">${dl.chapters} capitoli occupano <b>${fmtBytes(dl.bytes)}</b>. Si leggono senza connessione.</p>
-      ${recuperabile.length?`<div style="display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 14px">${recuperabile.join("")}</div>`:''}
+      ${recuperabile.length?`<div class="localonly" style="display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 14px">${recuperabile.join("")}</div>`:''}
       ${inCorso.length?`<div class="sub" style="margin-bottom:8px">In corso: ${inCorso.map(i=>esc(i.title||"?")+" "+(i.status==="downloading"?`(${i.done}/${i.total})`:i.status==="error"?"— errore":"— in coda")).join(" · ")}</div>`:''}
       <div style="max-height:44vh;overflow:auto">${groups.length?groups.map(g=>{
         const letti=g.readChapters?` · ${g.readChapters} già letti`:"";
@@ -1425,10 +1568,10 @@ function openDownloadsModal(){
             <div class="nt">${g.chapters} capitoli · ${esc(metaOf(g.source).name)}${letti}${fuori}</div>
           </div>
           <div style="font-size:13px;color:var(--muted);margin-right:10px;white-space:nowrap">${fmtBytes(g.bytes)}</div>
-          <button class="ricon" data-delmanga="${esc(g.mangaKey)}" title="Elimina i capitoli di questo manga">🗑</button></div>`;
+          <button class="ricon localonly" data-delmanga="${esc(g.mangaKey)}" title="Elimina i capitoli di questo manga">🗑</button></div>`;
       }).join(""):'<div class="empty">Nessun download.</div>'}</div>
       <div class="row">
-        ${dl.chapters?'<button class="btn sec" id="pgAll" style="margin-right:auto">Elimina tutto</button>':''}
+        ${dl.chapters?'<button class="btn sec localonly" id="pgAll" style="margin-right:auto">Elimina tutto</button>':''}
         <button class="btn sec" id="dlRefresh">Aggiorna</button><button class="btn" id="dlClose">Chiudi</button></div>`;
     renderExpRows();
     $("#importModal").classList.remove("hidden");

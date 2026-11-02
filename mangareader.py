@@ -6,8 +6,14 @@ Avvio:  python3 mangareader.py        (oppure: python3 mangareader.py 5599)
 
 import json
 import os
+import re
 import sys
 import time
+import hmac
+import hashlib
+import secrets
+import ipaddress
+import subprocess
 import gzip
 import shutil
 import socket
@@ -24,7 +30,7 @@ import urllib.error
 # Versione del BINARIO (questo file non si auto-aggiorna).
 # Va tenuta allineata a "binaryVersion" di version.json a ogni release che
 # tocca mangareader.py, altrimenti l'app continua a chiedere di riscaricarsi.
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -511,7 +517,267 @@ def save_data(data):
         os.replace(tmp, DATA_FILE)
 
 
+# ============================================================
+#  Accesso da altri dispositivi della rete di casa (es. iPhone)
+# ============================================================
+# Regole di sicurezza:
+#  - SPENTO di base: il server ascolta solo su 127.0.0.1, quindi dalla rete non è
+#    nemmeno raggiungibile (come sempre stato).
+#  - ACCESO: ascolta sulla rete, ma accetta solo indirizzi privati (rete di casa),
+#    solo con PIN, e le azioni delicate restano possibili solo dal computer.
+#  - Le impostazioni di sicurezza (lan*) si cambiano SOLO da /lan sul computer:
+#    POST /data non può modificarle e GET /data non espone hash né sale.
+#  - Controllo dell'intestazione Host (anche a interruttore spento): blocca i siti
+#    web che provano a parlare con l'app tramite "DNS rebinding".
+LAN_KEYS = ("lanAccess", "lanPinHash", "lanSalt")
+LAN_ACTIVE = False            # vero se il server è davvero in ascolto sulla rete
+LAN_PIN_RE = r"^\d{4,8}$"
+_LAN_LOCK = threading.Lock()
+_LAN_FAILS = {}               # ip -> [tentativi falliti, bloccato fino a]
+_LAN_CACHE = {"v": None, "ts": 0.0}
+
+# operazioni consentite solo dal computer su cui gira l'app
+LOCAL_ONLY = {"/update/apply", "/restart", "/quit", "/downloads/purge", "/download/delete",
+              "/cache/clear", "/exports/clear", "/lan", "/lan/info"}
+# raggiungibili dalla rete anche senza PIN (pagina di accesso e icona)
+LAN_PUBLIC = {"/lan/login", "/icon", "/manifest.json"}
+
+
+def lan_settings(fresh=False):
+    """(acceso, hash del PIN, sale) letti da library.json, memorizzati per 3 s."""
+    now = time.time()
+    if not fresh and _LAN_CACHE["v"] is not None and now - _LAN_CACHE["ts"] < 3:
+        return _LAN_CACHE["v"]
+    try:
+        s = load_data().get("settings") or {}
+    except Exception:
+        s = {}
+    v = (bool(s.get("lanAccess")), str(s.get("lanPinHash") or ""), str(s.get("lanSalt") or ""))
+    _LAN_CACHE["v"], _LAN_CACHE["ts"] = v, now
+    return v
+
+
+def _pin_hash(salt, pin):
+    return hashlib.sha256((salt + ":" + pin).encode("utf-8")).hexdigest()
+
+
+def _lan_token(pin_hash):
+    """Valore del cookie di accesso: resta valido finché non cambi il PIN."""
+    return hmac.new(pin_hash.encode("utf-8"), b"makreader-lan-v1", hashlib.sha256).hexdigest()
+
+
+def _norm_ip(ip):
+    ip = str(ip or "")
+    return ip[7:] if ip.startswith("::ffff:") else ip
+
+
+def _is_loopback(ip):
+    try:
+        return ipaddress.ip_address(_norm_ip(ip)).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_home_network(ip):
+    try:
+        a = ipaddress.ip_address(_norm_ip(ip))
+    except ValueError:
+        return False
+    return (a.is_private or a.is_link_local) and not a.is_loopback
+
+
+def _host_allowed(host_header):
+    """Nomi ammessi nell'intestazione Host: localhost, indirizzi IP privati e nomi
+    della rete locale (.local, .lan, .home, nomi senza punti). Un sito esterno che
+    tenta il DNS rebinding usa per forza un dominio pubblico, che qui viene rifiutato."""
+    h = str(host_header or "").strip().lower()
+    if not h:
+        return False
+    if h.startswith("["):
+        name = h[1:h.find("]")] if "]" in h else h
+    elif h.count(":") == 1:
+        name = h.split(":", 1)[0]
+    else:
+        name = h
+    name = name.rstrip(".")
+    if name in ("localhost", "127.0.0.1", "::1"):
+        return True
+    try:
+        a = ipaddress.ip_address(name)
+        return a.is_loopback or a.is_private or a.is_link_local
+    except ValueError:
+        pass
+    if "." not in name:
+        return True
+    return name.endswith((".local", ".lan", ".home", ".home.arpa", ".internal", ".fritz.box"))
+
+
+def lan_addresses(port):
+    """Indirizzi da aprire sul telefono: nome .local del computer e IP di rete."""
+    out = []
+    name = ""
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True,
+                                  text=True, timeout=3).stdout.strip()
+        except Exception:
+            name = ""
+    if not name:
+        name = (socket.gethostname() or "").split(".")[0]
+    if name:
+        out.append("http://%s.local:%d" % (name, port))
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))   # nessun pacchetto inviato: serve solo a
+            ip = s.getsockname()[0]            # sapere quale scheda di rete si usa
+        if ip and not ip.startswith("127."):
+            out.append("http://%s:%d" % (ip, port))
+    except Exception:
+        pass
+    return out
+
+
+LOGIN_PAGE = """<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MakReader">
+<link rel="apple-touch-icon" href="/icon"><title>MakReader</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f1115;color:#e7e9ee;font:16px -apple-system,system-ui,sans-serif}
+.box{width:min(320px,88vw);text-align:center}
+img{width:72px;height:72px;border-radius:16px}
+h1{font-size:20px;margin:14px 0 4px}p{color:#9aa3b2;font-size:14px;margin:0 0 18px}
+input{width:100%;box-sizing:border-box;font-size:24px;letter-spacing:8px;text-align:center;padding:12px;border-radius:12px;border:1px solid #2a2f3a;background:#171a21;color:#fff}
+button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:12px;background:#7c5cff;color:#fff;font-size:16px;font-weight:700}
+.err{color:#e0a13a;font-size:14px;min-height:20px;margin-top:10px}
+</style></head><body><form class="box" id="f">
+<img src="/icon" alt="" onerror="this.style.display='none'">
+<h1>MakReader</h1><p>Inserisci il PIN scelto nelle Impostazioni del computer.</p>
+<input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" autofocus>
+<button type="submit">Entra</button><div class="err" id="e"></div></form>
+<script>
+document.getElementById('f').onsubmit=async function(ev){ev.preventDefault();
+  var e=document.getElementById('e');e.textContent='';
+  try{var r=await fetch('/lan/login',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({pin:document.getElementById('pin').value})});
+      var d=await r.json();
+      if(d.ok){location.replace('/');return;}
+      e.textContent=d.error||'PIN errato';}
+  catch(x){e.textContent='Computer non raggiungibile.';}
+  document.getElementById('pin').value='';};
+</script></body></html>"""
+
+
+def _schedule_restart():
+    """Riavvia il programma (serve per cambiare l'indirizzo su cui ascolta)."""
+    def _restart():
+        try:
+            # "restarted" dice al nuovo processo di NON riaprire il browser
+            if getattr(sys, "frozen", False):
+                os.execv(sys.executable, [sys.executable, str(CURRENT_PORT), "restarted"])
+            else:
+                os.execv(sys.executable, [sys.executable, os.path.abspath(__file__),
+                                          str(CURRENT_PORT), "restarted"])
+        except Exception:
+            os._exit(0)
+    threading.Timer(0.5, _restart).start()
+
+
 class Handler(BaseHTTPRequestHandler):
+    def _gate(self, path):
+        """Decide se la richiesta può passare. Se no, risponde già e ritorna False."""
+        ip = _norm_ip(self.client_address[0] if self.client_address else "")
+        if not _host_allowed(self.headers.get("Host")):
+            self._send(403, "Indirizzo non ammesso.", "text/plain; charset=utf-8")
+            return False
+        if _is_loopback(ip):
+            return True                       # dal computer stesso: nessun limite
+        enabled, pin_hash, _salt = lan_settings()
+        if not (enabled and LAN_ACTIVE and pin_hash) or not _is_home_network(ip):
+            self._send(403, "Accesso non consentito.", "text/plain; charset=utf-8")
+            return False
+        if path in LOCAL_ONLY:
+            self._json({"error": "Questa operazione si può fare solo dal computer su cui gira MakReader."}, 403)
+            return False
+        if path in LAN_PUBLIC:
+            return True
+        cookie = self.headers.get("Cookie") or ""
+        token = _lan_token(pin_hash)
+        for part in cookie.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "mkr_lan" and hmac.compare_digest(v.strip(), token):
+                return True
+        if self.command == "GET" and path in ("/", "/index.html"):
+            self._send(200, LOGIN_PAGE, "text/html; charset=utf-8")
+        else:
+            self._json({"error": "PIN richiesto", "needPin": True}, 401)
+        return False
+
+    def _lan_login(self, raw):
+        """Verifica il PIN da un altro dispositivo. Dopo 5 errori blocca quel
+        dispositivo per 5 minuti, così il PIN non si può indovinare per tentativi."""
+        ip = _norm_ip(self.client_address[0] if self.client_address else "")
+        now = time.time()
+        with _LAN_LOCK:
+            rec = _LAN_FAILS.get(ip)
+            if rec and rec[1] > now:
+                minuti = max(1, int((rec[1] - now) // 60) + 1)
+                self._json({"error": "Troppi tentativi: riprova fra %d minut%s."
+                                     % (minuti, "o" if minuti == 1 else "i")}, 429)
+                return
+        try:
+            pin = str((json.loads(raw) or {}).get("pin") or "").strip()
+        except Exception:
+            pin = ""
+        _enabled, pin_hash, salt = lan_settings(fresh=True)
+        ok = bool(pin_hash and pin) and hmac.compare_digest(_pin_hash(salt, pin), pin_hash)
+        if ok:
+            with _LAN_LOCK:
+                _LAN_FAILS.pop(ip, None)
+            cookie = ("mkr_lan=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict"
+                      % _lan_token(pin_hash))
+            self._send(200, json.dumps({"ok": True}), extra={"Set-Cookie": cookie})
+            return
+        with _LAN_LOCK:
+            rec = _LAN_FAILS.setdefault(ip, [0, 0.0])
+            rec[0] += 1
+            restano = 5 - rec[0]
+            if rec[0] >= 5:
+                rec[0], rec[1] = 0, now + 300
+                self._json({"error": "PIN errato. Troppi tentativi: riprova fra 5 minuti."}, 401)
+                return
+        self._json({"error": "PIN errato (%d tentativ%s rimast%s)."
+                             % (restano, "o" if restano == 1 else "i", "o" if restano == 1 else "i")}, 401)
+
+    def _lan_set(self, raw):
+        """Accende/spegne l'accesso dalla rete e imposta il PIN. Solo dal computer
+        (il controllo è in _gate: '/lan' è fra le operazioni LOCAL_ONLY)."""
+        try:
+            body = json.loads(raw) or {}
+        except Exception:
+            body = {}
+        enabled = bool(body.get("enabled"))
+        pin = str(body.get("pin") or "").strip()
+        d = load_data()
+        st = d.setdefault("settings", {})
+        if pin:
+            if not re.match(LAN_PIN_RE, pin):
+                self._json({"error": "Il PIN deve avere da 4 a 8 cifre."}, 400)
+                return
+            salt = secrets.token_hex(16)
+            st["lanSalt"] = salt
+            st["lanPinHash"] = _pin_hash(salt, pin)   # cambiare PIN scollega i telefoni
+        if enabled and not st.get("lanPinHash"):
+            self._json({"error": "Scegli prima un PIN."}, 400)
+            return
+        st["lanAccess"] = enabled
+        save_data(d)
+        lan_settings(fresh=True)
+        riavvio = enabled != LAN_ACTIVE
+        self._json({"ok": True, "restart": riavvio})
+        if riavvio:
+            _schedule_restart()   # per mettersi in ascolto (o smettere) sulla rete
+
     def log_message(self, *a):
         pass
 
@@ -536,6 +802,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p = urllib.parse.urlparse(self.path)
         path, q = p.path, urllib.parse.parse_qs(p.query)
+        if not self._gate(path):
+            return
+
+        if path == "/lan/info":
+            enabled, pin_hash, _ = lan_settings(fresh=True)
+            self._json({"enabled": enabled, "active": LAN_ACTIVE, "hasPin": bool(pin_hash),
+                        "port": CURRENT_PORT, "addresses": lan_addresses(CURRENT_PORT)})
+            return
+
+        if path == "/manifest.json":
+            # permette di aggiungere l'app alla schermata Home del telefono
+            self._json({"name": "MakReader", "short_name": "MakReader", "start_url": "/",
+                        "display": "standalone", "background_color": "#0f1115",
+                        "theme_color": "#0f1115",
+                        "icons": [{"src": "/icon", "sizes": "512x512", "type": "image/png"}]})
+            return
 
         if path in ("/", "/index.html"):
             try:
@@ -546,7 +828,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/data":
-            self._json(load_data())
+            d = load_data()
+            st = d.get("settings")
+            if isinstance(st, dict):
+                # hash e sale del PIN non escono mai dal computer
+                st.pop("lanPinHash", None)
+                st.pop("lanSalt", None)
+            self._json(d)
             return
 
         if path == "/icon":
@@ -790,9 +1078,31 @@ class Handler(BaseHTTPRequestHandler):
         p = urllib.parse.urlparse(self.path)
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
+        if not self._gate(p.path):
+            return
+        if p.path == "/lan/login":
+            self._lan_login(raw)
+            return
+        if p.path == "/lan":
+            self._lan_set(raw)
+            return
         if p.path == "/data":
             try:
-                save_data(json.loads(raw))
+                incoming = json.loads(raw)
+                if not isinstance(incoming, dict):
+                    raise ValueError("dati non validi")
+                # le impostazioni di sicurezza si cambiano solo da /lan: qui si
+                # conservano quelle già salvate, qualunque cosa arrivi dal browser
+                cur = load_data().get("settings") or {}
+                st = incoming.get("settings")
+                if not isinstance(st, dict):
+                    st = incoming["settings"] = {}
+                for k in LAN_KEYS:
+                    if k in cur:
+                        st[k] = cur[k]
+                    else:
+                        st.pop(k, None)
+                save_data(incoming)
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"error": str(e)}, 400)
@@ -989,19 +1299,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if p.path == "/restart":
             self._json({"ok": True})
-
-            def _restart():
-                try:
-                    # "restarted" dice al nuovo processo di NON riaprire il browser
-                    # (la scheda esistente si ricarica da sé: evita la finestra doppia)
-                    if getattr(sys, "frozen", False):
-                        os.execv(sys.executable, [sys.executable, str(CURRENT_PORT), "restarted"])
-                    else:
-                        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__),
-                                                  str(CURRENT_PORT), "restarted"])
-                except Exception:
-                    os._exit(0)
-            threading.Timer(0.5, _restart).start()
+            _schedule_restart()
             return
         if p.path == "/update/apply":
             if not UPDATE_REPO:
@@ -1027,34 +1325,43 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "non trovato", "text/plain")
 
 
-def is_free(port):
+def is_free(port, host="127.0.0.1"):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(("127.0.0.1", port)); return True
+            s.bind((host, port)); return True
         except OSError:
             return False
 
 
-def pick_port():
+def pick_port(host="127.0.0.1"):
     wanted = next((a for a in sys.argv[1:] if a.isdigit()), None)
     if wanted:
         p = int(wanted)
         # dopo un riavvio la vecchia porta può restare occupata un istante
-        for _ in range(20):
-            if is_free(p):
+        for _ in range(30):
+            if is_free(p, host):
                 return p
             time.sleep(0.1)
         print("  La porta %d è occupata, ne cerco un'altra…" % p)
     for p in PORT_CANDIDATES:
-        if p == 0 or is_free(p):
+        if p == 0 or is_free(p, host):
             return p
     return 0
 
 
 def main():
-    global CURRENT_PORT
-    server = ThreadingHTTPServer(("127.0.0.1", pick_port()), Handler)
+    global CURRENT_PORT, LAN_ACTIVE
+    # Accesso da altri dispositivi: solo se acceso E con un PIN impostato si ascolta
+    # sulla rete (0.0.0.0). Altrimenti solo sul computer, come sempre.
+    enabled, pin_hash, _ = lan_settings(fresh=True)
+    host = "0.0.0.0" if (enabled and pin_hash) else "127.0.0.1"
+    try:
+        server = ThreadingHTTPServer((host, pick_port(host)), Handler)
+    except OSError:
+        host = "127.0.0.1"   # se la rete non è disponibile si ripiega sul solo computer
+        server = ThreadingHTTPServer((host, pick_port(host)), Handler)
+    LAN_ACTIVE = host != "127.0.0.1"
     port = server.server_address[1]
     CURRENT_PORT = port
     url = "http://localhost:%d" % port
