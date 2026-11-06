@@ -1,5 +1,5 @@
 {
-  "version": "1.5.1",
-  "binaryVersion": "1.5.0",
-  "notes": "Lettore sul telefono: scorrere non fa più ricomparire i comandi. Un tocco al centro dello schermo li mostra o li nasconde; nelle modalità a pagine il tocco a sinistra o a destra gira pagina."
+  "version": "1.6.0",
+  "binaryVersion": "1.6.0",
+  "notes": "Usando MakReader da più dispositivi, i progressi di lettura non si perdono più: le pagine rimaste aperte si aggiornano da sole quando ci torni, e il computer tiene sempre la lettura più recente di ogni manga.\nI manga aggiunti o tolti da un dispositivo restano tali anche sugli altri."
 }

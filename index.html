@@ -214,7 +214,7 @@
   <div class="bar">
     <img src="/icon" class="logoimg" alt="" onerror="this.style.display='none'">
     <div class="logo">MakReader</div>
-    <span class="vertag" title="Versione installata">v1.5.1</span>
+    <span class="vertag" title="Versione installata">v1.6.0</span>
     <div class="tabs">
       <button class="tab active" data-tab="library">Libreria <span class="badge hidden" id="updBadge">0</span></button>
       <button class="tab" data-tab="search">Cerca</button>
@@ -314,7 +314,49 @@ async function jget(u){const r=await fetch(u);const d=await r.json();
   if(d&&d.needPin){location.reload();throw new Error("PIN richiesto");}   // PIN cambiato o accesso scaduto
   if(d&&d.error)throw new Error(d.error);return d;}
 let dataLoaded=false;
-async function saveDB(){if(!dataLoaded)return;await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
+let savesInFlight=0,saveGen=0;
+async function saveDB(){if(!dataLoaded)return;savesInFlight++;saveGen++;
+  try{await fetch("/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)});}
+  finally{savesInFlight--;}}
+// Manga aggiunti/tolti: si registra quando, così il computer non fa "risorgere" un
+// manga tolto da un altro dispositivo né perde uno aggiunto (vedi merge_library).
+function addFollow(k,obj){obj.addedAt=Date.now();DB.follows[k]=obj;if(DB.removed)delete DB.removed[k];}
+function removeFollow(k){delete DB.follows[k];DB.removed=DB.removed||{};DB.removed[k]=Date.now();}
+// Riallineamento: una pagina rimasta aperta (sul computer o sul telefono) ricarica
+// la libreria dal computer prima di continuare, così non lavora su una copia vecchia.
+let lastRefresh=Date.now();
+async function refreshDB(force){
+  if(!dataLoaded)return false;
+  if(!force&&Date.now()-lastRefresh<4000)return false;
+  for(let i=0;i<20&&savesInFlight>0;i++)await new Promise(r=>setTimeout(r,150));
+  const gen=saveGen;
+  try{
+    const d=await jget("/data?x="+Date.now());
+    if(savesInFlight>0||saveGen!==gen||!d||!d.follows)return false;   // salvataggio partito nel frattempo: alla prossima
+    const keepSources=DB.sources;
+    DB=d;if(!DB.sources||!DB.sources.order)DB.sources=keepSources;
+    if(!DB.suggestions)DB.suggestions=[];
+    if(DB.settings)SET=Object.assign(SET,DB.settings);
+    lastRefresh=Date.now();
+    return true;
+  }catch(e){return false;}
+}
+function dbFirma(){try{return JSON.stringify([DB.follows,DB.progress,DB.history]);}catch(e){return "";}}
+async function refreshAndRepaint(force){
+  const prima=dbFirma();
+  if(!(await refreshDB(force)))return;
+  if(dbFirma()===prima)return;                                  // niente di nuovo
+  if($("#reader").style.display==="block")return;               // mentre leggi non tocco niente
+  const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;
+  setSugBadge&&setSugBadge();
+  if(!$("#view-library").classList.contains("hidden"))renderLibrary();
+  else if(!$("#view-latest").classList.contains("hidden"))renderLatest();
+  else if(!$("#view-detail").classList.contains("hidden")&&curDetail)openDetail(curDetail.src,curDetail.id);
+}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshAndRepaint();});
+window.addEventListener("focus",()=>refreshAndRepaint());
+window.addEventListener("pageshow",e=>{if(e.persisted)refreshAndRepaint(true);});
+setInterval(()=>{if(document.visibilityState==="visible")refreshAndRepaint();},90000);
 
 // ---------- tabs ----------
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
@@ -849,10 +891,10 @@ async function openDetail(src,id,known){
     const kk=key(src,id),ff=DB.follows[kk],w=$("#libCtrlWrap");if(!w)return;
     if(!ff){
       w.innerHTML='<button class="btn" id="followBtn">+ Aggiungi alla libreria</button>';
-      $("#followBtn").onclick=async()=>{DB.follows[kk]={source:src,id,title:d.title||(known&&known.title)||"",cover:cover||"",category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null,latestNum:d.chapters.length?(d.chapters[d.chapters.length-1].number||""):""};await saveDB();toast("Aggiunto alla libreria ✓");renderLibCtrl();};
+      $("#followBtn").onclick=async()=>{addFollow(kk,{source:src,id,title:d.title||(known&&known.title)||"",cover:cover||"",category:"",lastChapterId:d.chapters.length?d.chapters[d.chapters.length-1].id:null,latestNum:d.chapters.length?(d.chapters[d.chapters.length-1].number||""):""});await saveDB();toast("Aggiunto alla libreria ✓");renderLibCtrl();};
     }else{
       w.innerHTML='<select id="libState" class="libstate">'+["",...CATS].map(c=>'<option value="'+esc(c)+'" '+((ff.category||"")===c?'selected':'')+'>'+(c?('✓ '+esc(c)):'✓ Nella libreria')+'</option>').join('')+'<option value="__remove__">✕ Rimuovi dalla libreria</option></select>';
-      $("#libState").onchange=async e=>{const val=e.target.value;if(val==="__remove__"){delete DB.follows[kk];await saveDB();toast("Rimosso dalla libreria");renderLibCtrl();return;}DB.follows[kk].category=val;await saveDB();toast("Stato aggiornato");};
+      $("#libState").onchange=async e=>{const val=e.target.value;if(val==="__remove__"){removeFollow(kk);await saveDB();toast("Rimosso dalla libreria");renderLibCtrl();return;}DB.follows[kk].category=val;await saveDB();toast("Stato aggiornato");};
     }
   }
   renderLibCtrl();
@@ -910,8 +952,8 @@ function fillCrossLatest(area){
 function migrateFollow(oldKey,newSrc,r){
   const old=DB.follows[oldKey]||{};
   const nk=key(newSrc,r.id);
-  delete DB.follows[oldKey];
-  DB.follows[nk]={source:newSrc,id:r.id,title:r.title||old.title||"",cover:r.cover||old.cover||"",category:old.category||"",malRead:old.malRead||0,lastChapterId:null};
+  removeFollow(oldKey);
+  addFollow(nk,{source:newSrc,id:r.id,title:r.title||old.title||"",cover:r.cover||old.cover||"",category:old.category||"",malRead:old.malRead||0,lastChapterId:null});
   saveDB();toast("Migrato su "+metaOf(newSrc).name);
 }
 
@@ -995,7 +1037,7 @@ function bindSug(v){
   const cl=$("#sugClear");if(cl)cl.onclick=async()=>{if(confirm("Svuotare tutti i suggerimenti?")){DB.suggestions=[];await saveDB();setSugBadge();renderSuggestions();}};
   v.querySelectorAll("[data-sf]").forEach(c=>c.onclick=()=>{sugFilter=c.dataset.sf;renderSuggestions();});
   v.querySelectorAll("[data-sopen]").forEach(b=>b.onclick=()=>{const s=DB.suggestions[+b.dataset.sopen];if(s)openDetail(s.source,s.id,s);});
-  v.querySelectorAll("[data-sadd]").forEach(b=>b.onclick=async()=>{const s=DB.suggestions[+b.dataset.sadd];if(!s)return;const k=key(s.source,s.id);if(!DB.follows[k])DB.follows[k]={source:s.source,id:s.id,title:s.title||"",cover:s.cover||"",category:"",lastChapterId:null};DB.suggestions.splice(+b.dataset.sadd,1);await saveDB();setSugBadge();renderSuggestions();toast("Aggiunto alla libreria ✓");});
+  v.querySelectorAll("[data-sadd]").forEach(b=>b.onclick=async()=>{const s=DB.suggestions[+b.dataset.sadd];if(!s)return;const k=key(s.source,s.id);if(!DB.follows[k])addFollow(k,{source:s.source,id:s.id,title:s.title||"",cover:s.cover||"",category:"",lastChapterId:null});DB.suggestions.splice(+b.dataset.sadd,1);await saveDB();setSugBadge();renderSuggestions();toast("Aggiunto alla libreria ✓");});
   v.querySelectorAll("[data-sign]").forEach(b=>b.onclick=async()=>{DB.suggestions.splice(+b.dataset.sign,1);await saveDB();setSugBadge();renderSuggestions();});
 }
 function malContentHtml(m){
@@ -1301,12 +1343,12 @@ function bindLib(v){
   const bind=(id,fn)=>{const e=$("#"+id);if(e)e.onclick=fn;};
   bind("bkAll",()=>{Object.keys(DB.follows).forEach(k=>selSet.add(k));renderLibrary();});
   bind("bkNone",()=>{selSet.clear();renderLibrary();});
-  bind("bkRm",async()=>{if(!selSet.size)return;if(confirm("Rimuovere "+selSet.size+" manga dalla libreria?")){selSet.forEach(k=>delete DB.follows[k]);selSet.clear();await saveDB();renderLibrary();}});
+  bind("bkRm",async()=>{if(!selSet.size)return;if(confirm("Rimuovere "+selSet.size+" manga dalla libreria?")){selSet.forEach(k=>removeFollow(k));selSet.clear();await saveDB();renderLibrary();}});
   bind("bkRead",async()=>{selSet.forEach(k=>{if(DB.follows[k])DB.follows[k].unread=0;});await saveDB();renderLibrary();toast("Segnati in pari");});
   bind("bkShare",()=>{const items=[...selSet].map(k=>DB.follows[k]).filter(Boolean).map(o=>({source:o.source,id:o.id,title:o.title,cover:o.cover}));if(items.length)openShareModal(items);});
   bind("bkDl",async()=>{if(!selSet.size)return;if(confirm("Scaricare TUTTI i capitoli di "+selSet.size+" manga? Può essere molto pesante."))bulkDownload([...selSet]);});
   const bc=$("#bkCat");if(bc)bc.onchange=async()=>{selSet.forEach(k=>{if(DB.follows[k])DB.follows[k].category=bc.value;});await saveDB();renderLibrary();toast("Stato aggiornato");};
-  v.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async e=>{e.stopPropagation();delete DB.follows[b.dataset.rm];await saveDB();renderLibrary();});
+  v.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async e=>{e.stopPropagation();removeFollow(b.dataset.rm);await saveDB();renderLibrary();});
   v.querySelectorAll(".card").forEach(el=>el.onclick=e=>{
     if(e.target.closest("[data-rm]"))return;
     const k=el.dataset.key;
@@ -1632,6 +1674,7 @@ async function autoCheck(notify){
                                   body:JSON.stringify({items})});
     res=(await r.json()).results||{};
   }catch(e){}
+  await refreshDB(true);   // il controllo può durare: riparto dalla libreria aggiornata
   for(const k in res){
     const num=res[k];
     if(num===null||num===undefined||num==="")continue;  // errore o vuoto: lascia com'è
@@ -1680,6 +1723,7 @@ async function scanGenres(force){
       try{
         const r=await fetch("/mal/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:chunk})});
         const res=(await r.json()).results||{};
+        await refreshDB(true);   // ogni blocco dura parecchio: riparto dalla libreria aggiornata
         for(const it of chunk){
           const f=DB.follows[it.key];if(!f)continue;
           const got=res[it.key];
@@ -1726,7 +1770,7 @@ $("#backupFile").addEventListener("change",async e=>{
   const f=e.target.files[0];e.target.value="";if(!f)return;
   if(!confirm("Ripristinare la libreria da questo file? Sostituirà i dati attuali."))return;
   try{const d=JSON.parse(await f.text());if(!d||!d.follows)throw new Error("file non valido");
-    DB=Object.assign(DB,d);await saveDB();libSelect=false;selSet.clear();renderLibrary();toast("Libreria ripristinata");
+    DB=Object.assign(DB,d);DB._replace=true;try{await saveDB();}finally{delete DB._replace;}libSelect=false;selSet.clear();renderLibrary();toast("Libreria ripristinata");
   }catch(err){toast("Ripristino fallito: "+err.message);}
 });
 function openImportModal(entries){
@@ -1792,7 +1836,7 @@ function reviewImport(notfound){
   $("#impClose2").onclick=()=>$("#importModal").classList.add("hidden");
   $("#impConfirm").onclick=async()=>{
     let added=0;
-    box.querySelectorAll("[data-pi]:checked").forEach(c=>{const p=impProposals[+c.dataset.pi];const k=key(impSrc,p.hit.id);if(!DB.follows[k]){DB.follows[k]={source:impSrc,id:p.hit.id,title:p.hit.title||p.orig,cover:p.hit.cover||"",category:p.status||"",malRead:parseInt(p.read||"0")||0,malId:p.malId||"",lastChapterId:null};added++;}});
+    box.querySelectorAll("[data-pi]:checked").forEach(c=>{const p=impProposals[+c.dataset.pi];const k=key(impSrc,p.hit.id);if(!DB.follows[k]){addFollow(k,{source:impSrc,id:p.hit.id,title:p.hit.title||p.orig,cover:p.hit.cover||"",category:p.status||"",malRead:parseInt(p.read||"0")||0,malId:p.malId||"",lastChapterId:null});added++;}});
     await saveDB();$("#importModal").classList.add("hidden");toast(`${added} manga aggiunti alla libreria`);renderLibrary();
   };
 }

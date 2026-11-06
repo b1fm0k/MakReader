@@ -30,7 +30,7 @@ import urllib.error
 # Versione del BINARIO (questo file non si auto-aggiorna).
 # Va tenuta allineata a "binaryVersion" di version.json a ogni release che
 # tocca mangareader.py, altrimenti l'app continua a chiedere di riscaricarsi.
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 # Dopo aver creato il repository su GitHub, scrivi qui "tuo-utente/nome-repo":
 UPDATE_REPO = "b1fm0k/MakReader"
 UPDATE_BRANCH = "main"
@@ -515,6 +515,95 @@ def save_data(data):
             except Exception:
                 pass
         os.replace(tmp, DATA_FILE)
+
+
+# ============================================================
+#  Unione dei salvataggi da più dispositivi
+# ============================================================
+def _ts(v):
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def merge_library(disk, incoming):
+    """Unisce un salvataggio in arrivo con la libreria già su disco.
+
+    Ogni pagina aperta (sul Mac, sul telefono) tiene in memoria una copia della
+    libreria e quando salva la manda tutta. Se la copia è vecchia — es. pagina
+    lasciata aperta sul Mac mentre si leggeva dal telefono — scriverla così com'è
+    cancellerebbe i progressi fatti altrove. Qui invece:
+      - progress: per ogni manga vince la lettura più recente (lastReadAt) e i
+        capitoli letti si sommano (nell'app si possono solo aggiungere);
+      - follows: un manga presente solo su disco resta, a meno che non sia stato
+        tolto apposta (registro 'removed'); un manga tolto non "risorge" da una
+        copia vecchia, a meno che non sia stato riaggiunto dopo (addedAt);
+      - history: unione, ordinata per lettura più recente;
+      - tutto il resto (impostazioni, fonti, suggerimenti): vince chi salva.
+    """
+    if not isinstance(disk, dict) or not isinstance(incoming, dict):
+        return incoming
+    out = dict(incoming)
+
+    removed = {}
+    for src in (disk.get("removed"), incoming.get("removed")):
+        if isinstance(src, dict):
+            for k, t in src.items():
+                t = _ts(t)
+                if t > removed.get(k, 0):
+                    removed[k] = t
+
+    df = disk.get("follows") if isinstance(disk.get("follows"), dict) else {}
+    inf = incoming.get("follows") if isinstance(incoming.get("follows"), dict) else {}
+    follows = {k: v for k, v in df.items() if k not in inf}
+    follows.update(inf)
+    for k in list(follows):
+        if k in removed:
+            f = follows[k] if isinstance(follows[k], dict) else {}
+            if removed[k] >= _ts(f.get("addedAt")):
+                del follows[k]            # tolto apposta: resta tolto
+            else:
+                del removed[k]            # riaggiunto dopo la rimozione
+    limite = time.time() * 1000 - 120 * 86400 * 1000   # i registri più vecchi di 4 mesi si buttano
+    out["follows"] = follows
+    out["removed"] = {k: t for k, t in removed.items() if t > limite}
+
+    dp = disk.get("progress") if isinstance(disk.get("progress"), dict) else {}
+    ip = incoming.get("progress") if isinstance(incoming.get("progress"), dict) else {}
+    progress = {}
+    for k in set(dp) | set(ip):
+        a, b = dp.get(k), ip.get(k)
+        if not isinstance(a, dict):
+            progress[k] = b
+            continue
+        if not isinstance(b, dict):
+            progress[k] = a
+            continue
+        base = dict(b) if _ts(b.get("lastReadAt")) >= _ts(a.get("lastReadAt")) else dict(a)
+        letti, visti = [], set()
+        for x in list(base.get("readChapters") or []) + list(a.get("readChapters") or []) + \
+                list(b.get("readChapters") or []):
+            if str(x) not in visti:
+                visti.add(str(x))
+                letti.append(x)
+        base["readChapters"] = letti
+        progress[k] = base
+    out["progress"] = progress
+
+    hist, visti = [], set()
+    for h in list(incoming.get("history") or []) + list(disk.get("history") or []):
+        if not isinstance(h, dict):
+            continue
+        hk = "%s||%s" % (h.get("source"), h.get("id"))
+        if hk in visti:
+            continue
+        visti.add(hk)
+        hist.append(h)
+    hist.sort(key=lambda h: -_ts((progress.get("%s||%s" % (h.get("source"), h.get("id"))) or {})
+                                 .get("lastReadAt")))
+    out["history"] = hist[:20]
+    return out
 
 
 # ============================================================
@@ -1091,9 +1180,17 @@ class Handler(BaseHTTPRequestHandler):
                 incoming = json.loads(raw)
                 if not isinstance(incoming, dict):
                     raise ValueError("dati non validi")
+                disk = load_data()
+                # Ripristino da backup: sostituisce davvero la libreria (solo dal
+                # computer). Ogni altro salvataggio viene UNITO a quello su disco,
+                # così una pagina con una copia vecchia non cancella i progressi.
+                sostituisci = bool(incoming.pop("_replace", False)) and \
+                    _is_loopback(self.client_address[0] if self.client_address else "")
+                if not sostituisci:
+                    incoming = merge_library(disk, incoming)
                 # le impostazioni di sicurezza si cambiano solo da /lan: qui si
                 # conservano quelle già salvate, qualunque cosa arrivi dal browser
-                cur = load_data().get("settings") or {}
+                cur = disk.get("settings") or {}
                 st = incoming.get("settings")
                 if not isinstance(st, dict):
                     st = incoming["settings"] = {}
